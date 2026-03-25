@@ -1,5 +1,4 @@
-# IvyTrader Project Overview
-## IvyTrader: A Multi-Agent Platform for Stock Research, Sentiment Analysis, and Forecasting
+# IvyTrader: A Multi-Agent Platform for Stock Research, Sentiment Analysis, and Forecasting
 
 ## 1. Project Overview
 
