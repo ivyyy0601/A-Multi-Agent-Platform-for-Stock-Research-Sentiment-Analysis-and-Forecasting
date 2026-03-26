@@ -1,4 +1,4 @@
-# IvyTrader: A Multi-Agent Platform for Stock Research, Sentiment Analysis, and Forecasting
+#  A Multi-Agent Platform for Stock Research, Sentiment Analysis, and Forecasting
 
 ## 1. Project Overview
 
@@ -30,36 +30,151 @@ for stock analysis.
 
 ---
 
-## 2. Core Objectives
+## 2. Page Overview
+
+This platform is organized around several pages, and each page has a different role in the workflow.
+
+### 2.1 Detail Page
+
+The `Detail` page is the main news-driven analysis page for a single ticker.
+
+On this page, the user can:
+
+- choose a ticker
+- change the chart time range
+- click one day to open `Day News`
+- select multiple days to open `Range News`
+- use `Ask AI` to summarize a selected period
+- open `AI Deep Analysis` for a single article
+
+From this page, the user gets:
+
+- price action and candlestick history
+- related news and Reddit-linked content
+- positive, negative, and neutral sentiment labels
+- a short-term forecast with confidence
+- top drivers behind the prediction
+- similar historical periods and what happened afterward
+- key impact news and AI-generated explanations
+
+### 2.2 Social Page
+
+The `Social` page is the sentiment-driven prediction page.
+
+On this page, the user can:
+
+- choose a ticker
+- switch between `Sentiment`, `Buzz`, and `Bullish %`
+- review cross-platform signals from Reddit, Twitter, and News
+- inspect similar historical sentiment setups
+
+From this page, the user gets:
+
+- a short-term bullish or bearish prediction
+- signal breakdown from the ML model, similar history, and combined output
+- current platform sentiment and buzz
+- top drivers behind the social prediction
+- similar historical days and their later returns
+- a final multi-signal summary
+
+### 2.3 Sentiment Page
+
+The `Sentiment` page is the visualization layer for sentiment data itself.
+
+On this page, the user can:
+
+- inspect sentiment trends over time
+- compare platforms
+- review how sentiment and activity change across dates
+
+From this page, the user gets:
+
+- a direct view of sentiment behavior
+- platform-level comparisons
+- a cleaner understanding of how sentiment changes before looking at forecasts
+
+### 2.4 Analysis Page
+
+The `Analysis` page is the LLM-based interpretation layer.
+
+On this page, the user can:
+
+- review integrated stock analysis
+- read research-style summaries generated from prepared system signals
+- inspect outputs that combine data from multiple modules
+
+From this page, the user gets:
+
+- a higher-level explanation built from price, news, sentiment, and model outputs
+- a research-style report instead of only a raw prediction
+- a more complete view of the ticker across multiple signals
+
+### 2.5 Team Page
+
+The `Team` page is the multi-agent decision layer.
+
+On this page, the user can:
+
+- see multiple agents analyze the same ticker from different roles
+- review each agent's opinion
+- read the final combined decision-style output
+
+From this page, the user gets:
+
+- a multi-perspective discussion process
+- different reasoning styles for the same ticker
+- a final manager-style conclusion after the agents are combined
+
+### 2.6 Ops Page
+
+The `Ops` page is the automation and pipeline control layer.
+
+On this page, the user can:
+
+- monitor pipeline status
+- see which step is currently running
+- review recent automation runs
+- manually trigger `Daily Update`
+- manually trigger `Batch Collect`
+
+From this page, the user gets:
+
+- visibility into data ingestion, model training, and forecast generation
+- confirmation that the system is actively updating
+- a manual control surface for the full automated workflow
+
+---
+
+## 3. Core Objectives
 
 This project is built around four main goals.
 
-### 2.1 Build a multi-source research framework
+### 3.1 Build a multi-source research framework
 
 Bring price data, news, and social sentiment into the same system instead of treating them as separate streams.
 
-### 2.2 Create two forecasting pipelines
+### 3.2 Create two forecasting pipelines
 
 Use two different perspectives to analyze every ticker:
 
 - `Detail`: more news-driven
 - `Social`: more sentiment-driven
 
-### 2.3 Add an LLM interpretation layer
+### 3.3 Add an LLM interpretation layer
 
 Allow the system not only to generate signals, but also to explain and organize them into a more research-style output.
 
-### 2.4 Build an automated update and training workflow
+### 3.4 Build an automated update and training workflow
 
 Turn data updates, model training, forecast generation, and monitoring into a continuous automated loop.
 
 ---
 
-## 3. Data System
+## 4. Data System
 
 The IvyTrader data system is built on three main categories.
 
-### 3.1 Price data
+### 4.1 Price data
 
 Price data is centered around OHLC:
 
@@ -71,7 +186,7 @@ Price data is centered around OHLC:
 
 This is the foundation for technical indicators and price-action analysis.
 
-### 3.2 News data
+### 4.2 News data
 
 News data comes from multiple sources and is aligned into a unified structure.  
 It is used to:
@@ -80,7 +195,7 @@ It is used to:
 - analyze news sentiment
 - measure article density and trend changes
 
-### 3.3 Social sentiment data
+### 4.3 Social sentiment data
 
 Social sentiment data mainly comes from:
 
@@ -98,11 +213,11 @@ This makes it suitable for daily analysis and modeling.
 
 ---
 
-## 4. Data Processing Workflow
+## 5. Data Processing Workflow
 
 Before anything reaches the models or the user interface, the system goes through a unified data processing workflow.
 
-### 4.1 Data collection
+### 5.1 Data collection
 
 The platform continuously collects:
 
@@ -110,7 +225,7 @@ The platform continuously collects:
 - news data
 - social and aggregated sentiment data
 
-### 4.2 Data cleaning and filtering
+### 5.2 Data cleaning and filtering
 
 Raw content is transformed into cleaner and more structured data.  
 The main focus is on:
@@ -119,7 +234,7 @@ The main focus is on:
 - sentiment labeling
 - date alignment
 
-### 4.3 Daily aggregation
+### 5.3 Daily aggregation
 
 Both news and social content are ultimately transformed into:
 
@@ -136,7 +251,7 @@ This step makes it possible to place news, sentiment, and price data on the same
 
 ---
 
-## 5. System Structure
+## 6. System Structure
 
 IvyTrader currently consists of six major pages or modules:
 
@@ -151,14 +266,14 @@ Together, they form a full structure that moves from data, to prediction, to exp
 
 ---
 
-## 6. Detail: News-Driven Analysis Page
+## 7. Detail: News-Driven Analysis Page
 
 The `Detail` page is the part of the platform that comes closest to a single-stock research terminal.  
 Its main purpose is:
 
 - to place price action, related news, model forecasts, and explanations on the same page
 
-### 6.1 Data used in Detail
+### 7.1 Data used in Detail
 
 The `Detail` page combines:
 
@@ -168,7 +283,7 @@ The `Detail` page combines:
 - news sentiment and summaries
 - similar historical periods
 
-### 6.2 Method used in Detail
+### 7.2 Method used in Detail
 
 The forecasting layer in `Detail` uses machine learning to estimate:
 
@@ -178,7 +293,7 @@ The forecasting layer in `Detail` uses machine learning to estimate:
 It does not only output a direction.  
 It also adds several explanation layers to make the result easier to understand.
 
-### 6.3 Main functions of the Detail page
+### 7.3 Main functions of the Detail page
 
 #### Price chart
 
@@ -238,7 +353,7 @@ This feature analyzes a single news item in more detail and explains:
 - why it matters
 - whether it is more bullish or bearish
 
-### 6.4 Positioning of Detail
+### 7.4 Positioning of Detail
 
 The `Detail` page is best suited for questions like:
 
@@ -250,7 +365,7 @@ It is one of the most complete single-stock research pages in the project.
 
 ---
 
-## 7. Social: Sentiment-Driven Forecast Page
+## 8. Social: Sentiment-Driven Forecast Page
 
 The `Social` page is the second major forecasting pipeline and complements `Detail`.  
 Instead of focusing on individual news events, it focuses on:
@@ -259,7 +374,7 @@ Instead of focusing on individual news events, it focuses on:
 - discussion intensity
 - cross-platform agreement
 
-### 7.1 Data used in Social
+### 8.1 Data used in Social
 
 The `Social` page mainly reads:
 
@@ -270,7 +385,7 @@ The `Social` page mainly reads:
 - bullish / bearish ratios
 - selected technical indicators
 
-### 7.2 Method used in Social
+### 8.2 Method used in Social
 
 The `Social` page uses a separate machine learning pipeline for short-term direction.  
 Its focus is on:
@@ -279,7 +394,7 @@ Its focus is on:
 - whether multiple platforms agree
 - how similar sentiment setups behaved historically
 
-### 7.3 Main functions of the Social page
+### 8.3 Main functions of the Social page
 
 #### Price + Sentiment Chart
 
@@ -330,7 +445,7 @@ This section finds the most similar historical sentiment setups and shows:
 
 This section provides the final overall judgment after combining all available signals.
 
-### 7.4 Positioning of Social
+### 8.4 Positioning of Social
 
 The `Social` page is best suited for questions like:
 
@@ -342,7 +457,7 @@ It is therefore a sentiment-driven short-term forecast page.
 
 ---
 
-## 8. Sentiment: Sentiment Visualization Page
+## 9. Sentiment: Sentiment Visualization Page
 
 The `Sentiment` page is designed primarily to visualize sentiment data itself.
 
@@ -354,7 +469,7 @@ It emphasizes:
 
 rather than full prediction output.
 
-### 8.1 Main role of the Sentiment page
+### 9.1 Main role of the Sentiment page
 
 It is useful for:
 
@@ -362,7 +477,7 @@ It is useful for:
 - comparing sentiment trends across platforms
 - visually studying the relationship between sentiment and market behavior
 
-### 8.2 Positioning of Sentiment
+### 9.2 Positioning of Sentiment
 
 If:
 
@@ -374,7 +489,7 @@ Then:
 
 ---
 
-## 9. Analysis: LLM-Based Interpretation Layer
+## 10. Analysis: LLM-Based Interpretation Layer
 
 The `Analysis` page serves as the interpretation layer of the platform.  
 It does not retrain models.  
@@ -383,7 +498,7 @@ Instead, it:
 - reads the structured signals already prepared by the system
 - uses an LLM to organize them into a higher-level explanation
 
-### 9.1 What Analysis reads
+### 10.1 What Analysis reads
 
 The page reads signals such as:
 
@@ -392,7 +507,7 @@ The page reads signals such as:
 - sentiment data
 - forecast outputs
 
-### 9.2 What Analysis produces
+### 10.2 What Analysis produces
 
 It produces:
 
@@ -400,7 +515,7 @@ It produces:
 - more report-like summaries
 - explanations that connect multiple signals together
 
-### 9.3 Positioning of Analysis
+### 10.3 Positioning of Analysis
 
 Compared with `Detail` and `Social`, which each focus on one main perspective, `Analysis` is better understood as:
 
@@ -410,13 +525,13 @@ Its purpose is to read existing signals and explain them clearly.
 
 ---
 
-## 10. AI Agent: Integrated Analysis Layer
+## 11. AI Agent: Integrated Analysis Layer
 
 On top of `Analysis`, the project also introduces:
 
 - AI Agent
 
-### 10.1 Role of the AI Agent
+### 11.1 Role of the AI Agent
 
 The AI Agent acts like:
 
@@ -425,7 +540,7 @@ The AI Agent acts like:
 It does not simply search freely on its own.  
 It mainly works from the structured information already available inside the system.
 
-### 10.2 What the AI Agent reads
+### 11.2 What the AI Agent reads
 
 It reads:
 
@@ -436,7 +551,7 @@ It reads:
 - outputs from `Detail`
 - outputs from `Social`
 
-### 10.3 What the AI Agent does
+### 11.3 What the AI Agent does
 
 It organizes these inputs into:
 
@@ -449,12 +564,12 @@ So the main value of this layer is:
 
 ---
 
-## 11. Team: Multi-Agent Decision Layer
+## 12. Team: Multi-Agent Decision Layer
 
 The `Team` page is the part of the project that comes closest to an investment committee workflow.  
 It introduces a multi-agent process for higher-level decision making.
 
-### 11.1 Core idea of Team
+### 12.1 Core idea of Team
 
 Different agents analyze the same stock from different perspectives, such as:
 
@@ -465,7 +580,7 @@ Different agents analyze the same stock from different perspectives, such as:
 
 Then a higher-level agent produces a combined conclusion.
 
-### 11.2 Main functions of the Team page
+### 12.2 Main functions of the Team page
 
 This page shows:
 
@@ -473,7 +588,7 @@ This page shows:
 - reports from different viewpoints
 - a final combined decision-style judgment
 
-### 11.3 Positioning of Team
+### 12.3 Positioning of Team
 
 It is not a single prediction page.  
 It is a:
@@ -486,11 +601,11 @@ So it is best understood as the decision layer of the system.
 
 ---
 
-## 12. Ops: Automation and Control Layer
+## 13. Ops: Automation and Control Layer
 
 The `Ops` page is responsible for showing and controlling the automation workflow.
 
-### 12.1 Daily Update
+### 13.1 Daily Update
 
 This step mainly handles:
 
@@ -499,7 +614,7 @@ This step mainly handles:
 - updating social sentiment
 - running preprocessing and data completion tasks
 
-### 12.2 Batch Collect
+### 13.2 Batch Collect
 
 This step mainly handles:
 
@@ -507,7 +622,7 @@ This step mainly handles:
 - training models
 - generating and refreshing forecasts
 
-### 12.3 Main functions of the Ops page
+### 13.3 Main functions of the Ops page
 
 The user can use `Ops` to:
 
@@ -518,7 +633,7 @@ The user can use `Ops` to:
   - `Run Daily Update`
   - `Run Batch Collect`
 
-### 12.4 Positioning of Ops
+### 13.4 Positioning of Ops
 
 The `Ops` page is what turns the system from a static interface into a:
 
@@ -530,7 +645,7 @@ automated platform.
 
 ---
 
-## 13. Relationship Between the Modules
+## 14. Relationship Between the Modules
 
 The whole system can be understood as a layered structure:
 
@@ -572,11 +687,11 @@ In other words, the system works like this:
 
 ---
 
-## 14. Main Characteristics of the Project
+## 15. Main Characteristics of the Project
 
 IvyTrader stands out in four main ways.
 
-### 14.1 Dual forecasting pipelines
+### 15.1 Dual forecasting pipelines
 
 It does not rely on only one model or one source of information.  
 It keeps both:
@@ -584,7 +699,7 @@ It keeps both:
 - a news-driven perspective
 - and a sentiment-driven perspective
 
-### 14.2 Strong explainability
+### 15.2 Strong explainability
 
 The platform does not only show a result.  
 It also provides:
@@ -594,18 +709,18 @@ It also provides:
 - key news
 - AI explanations
 
-### 14.3 Clear layered structure
+### 15.3 Clear layered structure
 
 Prediction, interpretation, decision making, and automation are separated into clear layers, making the system easier to extend and maintain.
 
-### 14.4 Automation
+### 15.4 Automation
 
 This is not just a static demo.  
 It is a system with real data updates, model training, forecast generation, and monitoring.
 
 ---
 
-## 15. Final Summary
+## 16. Final Summary
 
 IvyTrader is a stock research platform built around the theme of:
 
