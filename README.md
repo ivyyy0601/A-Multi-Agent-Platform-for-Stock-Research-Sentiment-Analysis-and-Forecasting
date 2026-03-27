@@ -15,12 +15,13 @@ Rather than acting as a single black-box prediction tool, IvyTrader is designed 
 ---
 
 ## 1. Multi-Agent Framework (Team Page)
+
 ![Team Page](./pic/picture1.png)
 
 We simulate a real-world investment workflow using a structured multi-agent system, where different roles collaborate to generate more robust trading decisions.
+![Team Page1](./pic/Pasted Graphic 1.png)
 
 ### Workflow
-
 - **Analysts Team**  
   Five analysts collect and process market data, including technical signals, news, sentiment, and fundamentals, together with outputs from internal models. A Personalized Analyst further adapts the analysis based on ticker-specific context.
 
