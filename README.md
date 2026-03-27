@@ -19,7 +19,7 @@ Rather than acting as a single black-box prediction tool, IvyTrader is designed 
 ![Team Page](./pic/picture1.png)
 
 We simulate a real-world investment workflow using a structured multi-agent system, where different roles collaborate to generate more robust trading decisions.
-![Team Page1](./pic/Pasted Graphic 1.png)
+![Team Page1](./pic/PastedGraphic1.png)
 
 ### Workflow
 - **Analysts Team**  
