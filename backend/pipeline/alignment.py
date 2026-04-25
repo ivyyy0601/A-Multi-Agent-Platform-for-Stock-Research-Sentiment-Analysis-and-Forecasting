@@ -102,12 +102,22 @@ def _to_iso_date(published_utc: Optional[str]) -> Optional[str]:
 
 
 def _shift_to_trade_day(d: str, idx: dict) -> Optional[str]:
+    """Map date to nearest trading day.
+    If the date is a trading day, use it.
+    Otherwise shift forward to next trading day (weekend/holiday news appears on next open).
+    Falls back to previous trading day if no future trading day found within 7 days.
+    """
     dt = datetime.fromisoformat(d).date()
-    for _ in range(7):
-        ds = dt.isoformat()
+    # Try forward first (next trading day)
+    for i in range(7):
+        ds = (dt + timedelta(days=i)).isoformat()
         if ds in idx:
             return ds
-        dt += timedelta(days=1)
+    # Fallback: try backward
+    for i in range(1, 8):
+        ds = (dt - timedelta(days=i)).isoformat()
+        if ds in idx:
+            return ds
     return None
 
 

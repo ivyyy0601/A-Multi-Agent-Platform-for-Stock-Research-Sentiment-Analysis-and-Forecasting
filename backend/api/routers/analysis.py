@@ -1,4 +1,4 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from typing import Optional
 
@@ -34,7 +34,13 @@ class StoryRequest(BaseModel):
 @router.post("/deep")
 def deep_analysis(req: DeepAnalysisRequest):
     """Trigger Layer 2 deep analysis for a single article."""
-    return analyze_article(req.news_id, req.symbol.upper())
+    try:
+        result = analyze_article(req.news_id, req.symbol.upper())
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Deep analysis unavailable: {exc}") from exc
+    if isinstance(result, dict) and result.get("error"):
+        raise HTTPException(status_code=404, detail=result["error"])
+    return result
 
 
 @router.post("/story")
@@ -84,7 +90,13 @@ def create_story(req: StoryRequest):
 def range_analysis(req: RangeAnalysisRequest):
     """Analyze price movement drivers for a date range (AI-powered, costly).
     Kept for future use — currently the frontend uses /range-local instead."""
-    return analyze_range(req.symbol.upper(), req.start_date, req.end_date, question=req.question)
+    try:
+        result = analyze_range(req.symbol.upper(), req.start_date, req.end_date, question=req.question)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"AI range analysis unavailable: {exc}") from exc
+    if isinstance(result, dict) and result.get("error"):
+        raise HTTPException(status_code=404, detail=result["error"])
+    return result
 
 
 @router.post("/range-local")

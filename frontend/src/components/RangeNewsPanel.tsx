@@ -40,6 +40,8 @@ interface Props {
   onAskAI: (question: string) => void;
 }
 
+const PREVIEW = 5;
+
 function pct(v: number | null) {
   if (v === null || v === undefined) return '-';
   const p = v * 100;
@@ -47,15 +49,55 @@ function pct(v: number | null) {
   return <span style={{ color, fontWeight: 600 }}>{p > 0 ? '+' : ''}{p.toFixed(2)}%</span>;
 }
 
+function SentimentSection({
+  label,
+  icon,
+  color,
+  items,
+}: {
+  label: string;
+  icon: string;
+  color: string;
+  items: NewsItem[];
+}) {
+  const [expanded, setExpanded] = useState(false);
+  if (items.length === 0) return null;
+  const visible = expanded ? items : items.slice(0, PREVIEW);
+
+  return (
+    <div className="range-news-section">
+      <button
+        className="range-news-section-title-btn"
+        style={{ color }}
+        onClick={() => setExpanded((v) => !v)}
+      >
+        <span>{icon} {label} ({items.length})</span>
+        <span className="range-section-chevron">{expanded ? '▲' : '▼'}</span>
+      </button>
+      <div className="range-section-body">
+        {visible.map((item) => (
+          <RangeNewsCard key={item.news_id} item={item} />
+        ))}
+        {items.length > PREVIEW && (
+          <button
+            className="range-news-more-btn"
+            onClick={() => setExpanded((v) => !v)}
+          >
+            {expanded ? 'Show less' : `Show ${items.length - PREVIEW} more`}
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function RangeNewsPanel({ symbol, startDate, endDate, priceChange, onClose, onAskAI }: Props) {
   const [data, setData] = useState<RangeNewsResponse | null>(null);
   const [loading, setLoading] = useState(false);
-  const [showAll, setShowAll] = useState(false);
 
   useEffect(() => {
     setLoading(true);
     setData(null);
-    setShowAll(false);
     axios
       .get(`/api/news/${symbol}/range?start=${startDate}&end=${endDate}`)
       .then((res) => setData(res.data))
@@ -65,6 +107,10 @@ export default function RangeNewsPanel({ symbol, startDate, endDate, priceChange
 
   const change = priceChange ?? 0;
   const isUp = change >= 0;
+
+  const bullish = data?.articles.filter((a) => a.sentiment === 'positive') ?? [];
+  const bearish = data?.articles.filter((a) => a.sentiment === 'negative') ?? [];
+  const neutral = data?.articles.filter((a) => a.sentiment !== 'positive' && a.sentiment !== 'negative') ?? [];
 
   return (
     <div className="news-panel">
@@ -92,52 +138,15 @@ export default function RangeNewsPanel({ symbol, startDate, endDate, priceChange
         <div className="news-empty">No news in this range</div>
       ) : (
         <div className="news-list">
-          {/* Bullish section */}
-          {data.top_bullish.length > 0 && (
-            <div className="range-news-section">
-              <div className="range-news-section-title bullish">
-                ▲ Bullish News ({data.top_bullish.length})
-              </div>
-              {data.top_bullish.map((item) => (
-                <RangeNewsCard key={item.news_id} item={item} />
-              ))}
-            </div>
-          )}
+          <SentimentSection label="Bullish News" icon="▲" color="#26a69a" items={bullish} />
+          <SentimentSection label="Bearish News" icon="▼" color="#ef5350" items={bearish} />
+          <SentimentSection label="Neutral" icon="—" color="#888" items={neutral} />
 
-          {/* Bearish section */}
-          {data.top_bearish.length > 0 && (
-            <div className="range-news-section">
-              <div className="range-news-section-title bearish">
-                ▼ Bearish News ({data.top_bearish.length})
-              </div>
-              {data.top_bearish.map((item) => (
-                <RangeNewsCard key={item.news_id} item={item} />
-              ))}
-            </div>
-          )}
-
-          {/* All news toggle */}
-          {data.articles.length > 0 && (
-            <div className="range-news-all">
-              <button
-                className="range-news-all-btn"
-                onClick={() => setShowAll(!showAll)}
-              >
-                {showAll ? 'Hide' : 'Show'} all {data.total} articles
-                <span className="range-news-all-arrow">{showAll ? '▲' : '▼'}</span>
-              </button>
-              {showAll && data.articles.map((item) => (
-                <RangeNewsCard key={item.news_id} item={item} />
-              ))}
-            </div>
-          )}
-
-          {/* Ask AI button */}
           <button
             className="range-news-ai-btn"
             onClick={() => onAskAI("What's driving the price movement?")}
           >
-            Ask PokieTicker
+            Ask AI
           </button>
         </div>
       )}

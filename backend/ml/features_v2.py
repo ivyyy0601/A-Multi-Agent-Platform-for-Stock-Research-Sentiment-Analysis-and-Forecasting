@@ -3,8 +3,8 @@
 New features over v1:
 1. Market-wide sentiment (cross-ticker aggregate)
 2. Candlestick patterns (doji, hammer, engulfing, etc.)
-3. TF-IDF on news text (key_discussion + title) → PCA top components
-4. New targets: big_move_1pct, big_move_2pct, direction_if_big
+3. TF-IDF on news text (key_discussion + title) -> PCA top components
+4. New targets for stronger-move / longer-horizon experiments
 """
 
 import pandas as pd
@@ -23,8 +23,9 @@ def _load_market_sentiment() -> pd.DataFrame:
         """
         SELECT na.trade_date,
                COUNT(*) AS mkt_articles,
-               SUM(CASE WHEN l1.sentiment = 'positive' THEN 1 ELSE 0 END) AS mkt_positive,
-               SUM(CASE WHEN l1.sentiment = 'negative' THEN 1 ELSE 0 END) AS mkt_negative,
+               SUM(CASE WHEN l1.relevance IN ('relevant','high','medium') THEN 1 ELSE 0 END) AS mkt_relevant,
+               SUM(CASE WHEN l1.relevance IN ('relevant','high','medium') AND l1.sentiment = 'positive' THEN 1 ELSE 0 END) AS mkt_positive,
+               SUM(CASE WHEN l1.relevance IN ('relevant','high','medium') AND l1.sentiment = 'negative' THEN 1 ELSE 0 END) AS mkt_negative,
                COUNT(DISTINCT na.symbol) AS mkt_tickers_active
         FROM news_aligned na
         JOIN layer1_results l1 ON na.news_id = l1.news_id AND na.symbol = l1.symbol
@@ -38,9 +39,9 @@ def _load_market_sentiment() -> pd.DataFrame:
         return pd.DataFrame()
     df = pd.DataFrame([dict(r) for r in rows])
     df["trade_date"] = pd.to_datetime(df["trade_date"])
-    total = df["mkt_articles"].clip(lower=1)
-    df["mkt_sentiment"] = (df["mkt_positive"] - df["mkt_negative"]) / total
-    df["mkt_positive_ratio"] = df["mkt_positive"] / total
+    relevant_total = df["mkt_relevant"].clip(lower=1)
+    df["mkt_sentiment"] = (df["mkt_positive"] - df["mkt_negative"]) / relevant_total
+    df["mkt_positive_ratio"] = df["mkt_positive"] / relevant_total
     # Rolling market sentiment
     df["mkt_sentiment_3d"] = df["mkt_sentiment"].rolling(3, min_periods=1).mean()
     df["mkt_sentiment_5d"] = df["mkt_sentiment"].rolling(5, min_periods=1).mean()
@@ -173,15 +174,23 @@ def build_features_v2(symbol: str, use_text: bool = True) -> pd.DataFrame:
     ret_t1 = close.shift(-1) / close - 1
     ret_t2 = close.shift(-2) / close - 1
     ret_t3 = close.shift(-3) / close - 1
+    ret_t7 = close.shift(-7) / close - 1
+    ret_t14 = close.shift(-14) / close - 1
 
     # Big move targets: |return| > threshold
     df["target_big1_t1"] = (ret_t1.abs() > 0.01).astype(int)  # >1% move
     df["target_big2_t1"] = (ret_t1.abs() > 0.02).astype(int)  # >2% move
     df["target_big1_t3"] = ((close.shift(-3) / close - 1).abs() > 0.02).astype(int)  # >2% in 3 days
+    df["target_big_t7"] = (ret_t7.abs() > 0.03).astype(int)   # >3% in 7d
+    df["target_big_t14"] = (ret_t14.abs() > 0.05).astype(int)  # >5% in 14d
 
     # Direction only when big move (more signal)
     df["target_up_big_t1"] = ((ret_t1 > 0.01)).astype(int)   # up >1%
     df["target_down_big_t1"] = ((ret_t1 < -0.01)).astype(int)  # down >1%
+    df["target_up_big_t7"] = (ret_t7 > 0.03).astype(int)
+    df["target_down_big_t7"] = (ret_t7 < -0.03).astype(int)
+    df["target_up_big_t14"] = (ret_t14 > 0.05).astype(int)
+    df["target_down_big_t14"] = (ret_t14 < -0.05).astype(int)
 
     # Drop NaN from new features
     df = df.dropna(subset=["candle_body_ratio"]).reset_index(drop=True)

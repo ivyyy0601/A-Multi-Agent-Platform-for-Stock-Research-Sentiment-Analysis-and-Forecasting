@@ -23,9 +23,8 @@ interface SimilarPeriod {
   period_end: string;
   similarity: number;
   avg_sentiment: number;
-  n_articles: number;
-  ret_after_5d: number | null;
-  ret_after_10d: number | null;
+  n_relevant: number;
+  ret_after_horizon: number | null;
 }
 
 interface Headline {
@@ -44,6 +43,7 @@ interface ImpactArticle {
   key_discussion: string;
   ret_t0: number | null;
   ret_t1: number | null;
+  article_url: string | null;
 }
 
 interface NewsSummary {
@@ -58,10 +58,31 @@ interface NewsSummary {
 
 interface SimilarStats {
   count: number;
-  up_ratio_5d: number;
-  up_ratio_10d: number;
-  avg_ret_5d: number | null;
-  avg_ret_10d: number | null;
+  horizon_days: number;
+  up_ratio: number | null;
+  avg_ret: number | null;
+  weighted_up_ratio: number | null;
+  weighted_avg_ret: number | null;
+}
+
+interface SimilarDaySnapshot {
+  date: string;
+  similarity: number;
+  sentiment_score: number;
+  n_relevant: number;
+  ret_after_horizon: number | null;
+  ret_t1_after: number | null;
+}
+
+interface SimilarDaysApiData {
+  similar_days: SimilarDaySnapshot[];
+  stats: {
+    count: number;
+    up_ratio_t1: number | null;
+    avg_ret_t1: number | null;
+    weighted_up_ratio_t1: number | null;
+    weighted_avg_ret_t1: number | null;
+  };
 }
 
 interface DeepAnalysis {
@@ -74,6 +95,7 @@ interface DeepAnalysis {
 interface Forecast {
   symbol: string;
   window_days: number;
+  horizon_key: string;
   forecast_date: string;
   news_summary: NewsSummary;
   prediction: Record<string, HorizonPrediction>;
@@ -84,6 +106,29 @@ interface Forecast {
 
 interface Props {
   symbol: string;
+  refDate?: string;
+}
+
+interface CombinedSignal {
+  direction: 'up' | 'down';
+  confidence: number;
+  similarityDirection: 'up' | 'down' | null;
+  similarityProbability: number | null;
+  mlEdge: number | null;
+  mlWeight: number;
+  simWeight: number;
+  mlDirection: 'up' | 'down' | null;
+  mlProbability: number | null;
+}
+
+async function fetchForecast(symbol: string, windowDays: 1 | 7 | 14, refDate?: string): Promise<Forecast | null> {
+  const params = { window: windowDays, date: refDate || undefined };
+  try {
+    const res = await axios.get(`/api/predict/${symbol}/forecast`, { params });
+    return res.data as Forecast;
+  } catch {
+    return null;
+  }
 }
 
 function extractKeywords(headlines: Headline[]): string[] {
@@ -184,9 +229,65 @@ function renderStyledText(text: string): React.ReactNode[] {
   return parts;
 }
 
-export default function PredictionPanel({ symbol }: Props) {
+function buildCombinedSignal(
+  pred: HorizonPrediction | undefined,
+  stats: SimilarStats
+): CombinedSignal | null {
+  const simProb = stats.weighted_up_ratio ?? stats.up_ratio;
+  if (simProb == null) return null;
+
+  const similarityDirection: 'up' | 'down' = simProb >= 0.5 ? 'up' : 'down';
+  const mlEdge =
+    pred?.model_accuracy != null && pred?.baseline_accuracy != null
+      ? pred.model_accuracy - pred.baseline_accuracy
+      : null;
+  const mlUpProb = pred ? (pred.direction === 'up' ? pred.confidence : 1 - pred.confidence) : null;
+  const mlDirection: 'up' | 'down' | null =
+    mlUpProb == null ? null : (mlUpProb >= 0.5 ? 'up' : 'down');
+
+  let mlWeight = 0;
+  if (pred && mlEdge != null) {
+    if (mlEdge <= -0.15) mlWeight = 0.08;
+    else if (mlEdge <= -0.05) mlWeight = 0.15;
+    else if (mlEdge <= 0) mlWeight = 0.20;
+    else if (mlEdge <= 0.05) mlWeight = 0.30;
+    else mlWeight = 0.40;
+  }
+  if (mlDirection && mlDirection === similarityDirection) {
+    mlWeight = Math.min(0.50, mlWeight + 0.08);
+  } else if (mlDirection && mlDirection !== similarityDirection) {
+    mlWeight = Math.max(0.05, mlWeight - 0.04);
+  }
+  const simWeight = 1 - mlWeight;
+  let upProb = simProb;
+  if (mlUpProb != null && mlWeight > 0) {
+    upProb = simWeight * simProb + mlWeight * mlUpProb;
+  }
+
+  return {
+    direction: upProb >= 0.5 ? 'up' : 'down',
+    confidence: Math.max(upProb, 1 - upProb),
+    similarityDirection,
+    similarityProbability: simProb,
+    mlEdge,
+    mlWeight,
+    simWeight,
+    mlDirection,
+    mlProbability: mlUpProb,
+  };
+}
+
+export default function PredictionPanel({ symbol, refDate }: Props) {
+  const [forecast1, setForecast1] = useState<Forecast | null>(null);
   const [forecast7, setForecast7] = useState<Forecast | null>(null);
-  const [forecast30, setForecast30] = useState<Forecast | null>(null);
+  const [forecast14, setForecast14] = useState<Forecast | null>(null);
+  const [similar1D, setSimilar1D] = useState<SimilarDaysApiData | null>(null);
+  const [forecastCache, setForecastCache] = useState<Record<string, {
+    f1: Forecast | null;
+    f7: Forecast | null;
+    f14: Forecast | null;
+  }>>({});
+  const [activeWindow, setActiveWindow] = useState<1 | 7 | 14>(1);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [expanded, setExpanded] = useState(true);
@@ -194,33 +295,74 @@ export default function PredictionPanel({ symbol }: Props) {
   // Deep analysis state
   const [deepLoading, setDeepLoading] = useState<string | null>(null);
   const [deepResults, setDeepResults] = useState<Record<string, DeepAnalysis>>({});
+  const [deepErrors, setDeepErrors] = useState<Record<string, string>>({});
 
   useEffect(() => {
     if (!symbol) return;
     setLoading(true);
     setError('');
+    const cacheKey = `${symbol}|${refDate || 'latest'}`;
+    const cached = forecastCache[cacheKey];
     Promise.all([
-      axios.get(`/api/predict/${symbol}/forecast?window=7`).then((res) => res.data as Forecast).catch(() => null),
-      axios.get(`/api/predict/${symbol}/forecast?window=30`).then((res) => res.data as Forecast).catch(() => null),
+      fetchForecast(symbol, 1, refDate),
+      fetchForecast(symbol, 7, refDate),
+      fetchForecast(symbol, 14, refDate),
     ])
-      .then(([f7, f30]) => {
-        setForecast7(f7);
-        setForecast30(f30);
-        if (!f7 && !f30) setError('No model available');
+      .then(([f1, f7, f14]) => {
+        const next1 = f1 || cached?.f1 || null;
+        const next7 = f7 || cached?.f7 || null;
+        const next14 = f14 || cached?.f14 || null;
+
+        setForecast1(next1);
+        setForecast7(next7);
+        setForecast14(next14);
+
+        if (f1 || f7 || f14) {
+          setForecastCache((prev) => ({
+            ...prev,
+            [cacheKey]: {
+              f1: f1 || prev[cacheKey]?.f1 || null,
+              f7: f7 || prev[cacheKey]?.f7 || null,
+              f14: f14 || prev[cacheKey]?.f14 || null,
+            },
+          }));
+        }
+
+        if (!next1 && !next7 && !next14) {
+          setError('No model available');
+        } else if (f1 && f7 && f14) {
+          setError('');
+        } else if (!f1 || !f7 || !f14) {
+          setError('Showing latest available forecast');
+        }
       })
       .finally(() => setLoading(false));
-  }, [symbol]);
+  }, [symbol, refDate]);
+
+  useEffect(() => {
+    if (!symbol || !refDate) {
+      setSimilar1D(null);
+      return;
+    }
+    axios
+      .get(`/api/predict/${symbol}/similar-days?date=${refDate}`)
+      .then((res) => setSimilar1D(res.data as SimilarDaysApiData))
+      .catch(() => setSimilar1D(null));
+  }, [symbol, refDate]);
 
   const keywords = useMemo(() => {
-    const fc = forecast7 || forecast30;
+    const fc = forecast1 || forecast7 || forecast14;
     if (!fc) return [];
     return extractKeywords(fc.news_summary.top_headlines);
-  }, [forecast7, forecast30]);
+  }, [forecast1, forecast7, forecast14]);
 
-  // Primary forecast for the header summary
-  const primaryForecast = forecast7 || forecast30;
+  const activeForecast =
+    activeWindow === 1 ? (forecast1 || forecast7 || forecast14) :
+    activeWindow === 7 ? (forecast7 || forecast1 || forecast14) :
+    (forecast14 || forecast7 || forecast1);
+  const primaryForecast = activeForecast;
   const primary = primaryForecast
-    ? (primaryForecast.prediction.t3 || primaryForecast.prediction.t1 || primaryForecast.prediction.t5)
+    ? (primaryForecast.prediction.t1 || primaryForecast.prediction.t7 || primaryForecast.prediction.t14)
     : null;
   const isUp = primary?.direction === 'up';
   const ns = primaryForecast?.news_summary;
@@ -237,7 +379,7 @@ export default function PredictionPanel({ symbol }: Props) {
     );
   }
 
-  if (error || (!forecast7 && !forecast30)) {
+  if (error || (!forecast1 && !forecast7 && !forecast14)) {
     return (
       <div className="pred-panel">
         <div className="pred-header">
@@ -253,7 +395,20 @@ export default function PredictionPanel({ symbol }: Props) {
       {/* Header bar */}
       <div className="pred-header" onClick={() => setExpanded(!expanded)}>
         <span className="pred-title">Forecast</span>
-
+        <div className="pred-window-toggle" onClick={(e) => e.stopPropagation()}>
+          <button
+            className={`pred-window-btn ${activeWindow === 1 ? 'active' : ''}`}
+            onClick={() => setActiveWindow(1)}
+          >1D</button>
+          <button
+            className={`pred-window-btn ${activeWindow === 7 ? 'active' : ''}`}
+            onClick={() => setActiveWindow(7)}
+          >7D</button>
+          <button
+            className={`pred-window-btn ${activeWindow === 14 ? 'active' : ''}`}
+            onClick={() => setActiveWindow(14)}
+          >14D</button>
+        </div>
         {primary && (
           <>
             <div className={`pred-arrow ${isUp ? 'up' : 'down'}`}>
@@ -296,29 +451,19 @@ export default function PredictionPanel({ symbol }: Props) {
             </div>
           )}
 
-          {/* 7D Forecast Section */}
-          {forecast7 && (
+          {activeForecast && (
             <ForecastSection
-              label="7-Day"
-              forecast={forecast7}
+              key={activeForecast.window_days}
+              label={`${activeForecast.window_days}D`}
+              forecast={activeForecast}
+              exactSimilar1D={activeForecast.window_days === 1 ? similar1D : null}
               symbol={symbol}
               deepLoading={deepLoading}
               deepResults={deepResults}
+              deepErrors={deepErrors}
               setDeepLoading={setDeepLoading}
               setDeepResults={setDeepResults}
-            />
-          )}
-
-          {/* 30D Forecast Section */}
-          {forecast30 && (
-            <ForecastSection
-              label="30-Day"
-              forecast={forecast30}
-              symbol={symbol}
-              deepLoading={deepLoading}
-              deepResults={deepResults}
-              setDeepLoading={setDeepLoading}
-              setDeepResults={setDeepResults}
+              setDeepErrors={setDeepErrors}
             />
           )}
         </div>
@@ -330,27 +475,51 @@ export default function PredictionPanel({ symbol }: Props) {
 function ForecastSection({
   label,
   forecast,
+  exactSimilar1D,
   symbol,
   deepLoading,
   deepResults,
+  deepErrors,
   setDeepLoading,
   setDeepResults,
+  setDeepErrors,
 }: {
   label: string;
   forecast: Forecast;
+  exactSimilar1D: SimilarDaysApiData | null;
   symbol: string;
   deepLoading: string | null;
   deepResults: Record<string, DeepAnalysis>;
+  deepErrors: Record<string, string>;
   setDeepLoading: (id: string | null) => void;
   setDeepResults: React.Dispatch<React.SetStateAction<Record<string, DeepAnalysis>>>;
+  setDeepErrors: React.Dispatch<React.SetStateAction<Record<string, string>>>;
 }) {
-  const t1 = forecast.prediction.t1;
-  const t3 = forecast.prediction.t3;
-  const t5 = forecast.prediction.t5;
-  const primary = t3 || t1 || t5;
-  const isUp = primary?.direction === 'up';
+  const horizonKey = forecast.horizon_key;
+  const primary = forecast.prediction[horizonKey];
   const ns = forecast.news_summary;
-  const stats = forecast.similar_stats;
+  const stats = exactSimilar1D
+    ? {
+        count: exactSimilar1D.stats.count,
+        horizon_days: 1,
+        up_ratio: exactSimilar1D.stats.up_ratio_t1,
+        avg_ret: exactSimilar1D.stats.avg_ret_t1,
+        weighted_up_ratio: exactSimilar1D.stats.weighted_up_ratio_t1,
+        weighted_avg_ret: exactSimilar1D.stats.weighted_avg_ret_t1,
+      }
+    : forecast.similar_stats;
+  const similarPeriods = exactSimilar1D
+    ? exactSimilar1D.similar_days.map((day) => ({
+        period_start: day.date,
+        period_end: day.date,
+        similarity: day.similarity,
+        avg_sentiment: day.sentiment_score,
+        n_relevant: day.n_relevant,
+        ret_after_horizon: day.ret_t1_after ?? day.ret_after_horizon,
+      }))
+    : forecast.similar_periods;
+  const combined = buildCombinedSignal(primary, stats);
+  const combinedUp = combined?.direction === 'up';
 
   const conclusionBullets = forecast.conclusion
     ? forecast.conclusion.split(/(?<=[.!?])\s+/).filter((s) => s.trim().length > 0)
@@ -358,17 +527,24 @@ function ForecastSection({
 
   return (
     <div className="fc-section-block">
-      <div className="fc-section-divider">{label} Forecast</div>
+      <div className="fc-section-divider">
+        {label} Forecast
+        {forecast.forecast_date && (
+          <span style={{ fontSize: '11px', color: '#888', marginLeft: '8px', fontWeight: 'normal' }}>
+            Based on market data through {forecast.forecast_date}
+          </span>
+        )}
+      </div>
 
       {/* AI Prediction Hero */}
-      {primary && (
-        <div className={`fc-hero ${isUp ? 'fc-hero-up' : 'fc-hero-down'}`}>
-          <span className="fc-hero-arrow">{isUp ? '\u2191' : '\u2193'}</span>
+      {combined && (
+        <div className={`fc-hero ${combinedUp ? 'fc-hero-up' : 'fc-hero-down'}`}>
+          <span className="fc-hero-arrow">{combinedUp ? '\u2191' : '\u2193'}</span>
           <div className="fc-hero-text">
-            <span className="fc-hero-label">{label}:</span>
-            <span className="fc-hero-dir">{isUp ? 'Bullish' : 'Bearish'}</span>
+            <span className="fc-hero-label">{label} Combined:</span>
+            <span className="fc-hero-dir">{combinedUp ? 'Bullish' : 'Bearish'}</span>
           </div>
-          <span className="fc-hero-conf">{(primary.confidence * 100).toFixed(0)}%</span>
+          <span className="fc-hero-conf">{(combined.confidence * 100).toFixed(0)}%</span>
         </div>
       )}
 
@@ -384,20 +560,84 @@ function ForecastSection({
         </div>
       )}
 
+      {/* Combined explanation */}
+      {combined && (
+        <div className="fc-analysis" style={{ marginTop: 8 }}>
+          <div className="fc-section-title">Combined Judgment</div>
+          <ul className="fc-bullet-list">
+            <li className="fc-bullet-item">
+              Similarity leans <strong>{combined.similarityDirection === 'up' ? 'bullish' : 'bearish'}</strong>
+              {combined.similarityProbability != null ? ` (${(combined.similarityProbability * 100).toFixed(0)}% up-ratio signal).` : '.'}
+            </li>
+            <li className="fc-bullet-item">
+              {combined.mlDirection
+                ? `ML leans ${combined.mlDirection === 'up' ? 'bullish' : 'bearish'} and contributes ${(combined.mlWeight * 100).toFixed(0)}% of the final signal (${combined.mlEdge != null ? `${combined.mlEdge >= 0 ? '+' : ''}${(combined.mlEdge * 100).toFixed(1)}pp vs baseline` : 'no baseline info'}).`
+                : 'No ML contribution available for this horizon.'}
+            </li>
+          </ul>
+        </div>
+      )}
+
       {/* Prediction cards */}
-      <div className="fc-predictions">
-        {t1 && <PredictionCard label="T+1" pred={t1} />}
-        {t3 && <PredictionCard label="T+3" pred={t3} />}
-        {t5 && <PredictionCard label="T+5" pred={t5} />}
-      </div>
+      {primary && (
+        <div className="fc-predictions">
+          <PredictionCard label={`${forecast.window_days}D ML`} pred={primary} />
+        </div>
+      )}
+
+      {/* Similar historical days */}
+      {stats.count > 0 && (
+        <div className="fc-similar-section">
+          <div className="fc-section-title">Similarity Prediction ({stats.count} similar days)</div>
+          <div className="fc-similar-stats">
+            <div className="fc-stat">
+              <span className="fc-stat-label">Up Ratio</span>
+              <span className="fc-stat-sub" style={{ display: 'block', fontSize: '10px', color: '#6b7280', marginTop: '2px' }}>
+                Frequency
+              </span>
+              <span className={`fc-stat-value ${((stats.weighted_up_ratio ?? stats.up_ratio) ?? 0) > 0.5 ? 'up' : 'down'}`}>
+                {((stats.weighted_up_ratio ?? stats.up_ratio) ?? 0) !== null ? `${((((stats.weighted_up_ratio ?? stats.up_ratio) ?? 0) * 100)).toFixed(0)}%` : '-'}
+              </span>
+            </div>
+            <div className="fc-stat">
+              <span className="fc-stat-label">Avg Return</span>
+              <span className={`fc-stat-value ${((stats.weighted_avg_ret ?? stats.avg_ret) ?? 0) >= 0 ? 'up' : 'down'}`}>
+                {(stats.weighted_avg_ret ?? stats.avg_ret) != null ? `${(stats.weighted_avg_ret ?? stats.avg_ret)! >= 0 ? '+' : ''}${(stats.weighted_avg_ret ?? stats.avg_ret)!.toFixed(1)}%` : '-'}
+              </span>
+            </div>
+          </div>
+
+          <div className="fc-periods-list">
+            {similarPeriods.slice(0, 5).map((p, i) => (
+              <div key={i} className="fc-period-card">
+                <div className="fc-period-header">
+                  <span className="fc-period-dates">{p.period_start}</span>
+                  <span className="fc-period-sim">{(p.similarity * 100).toFixed(0)}% match</span>
+                </div>
+                <div className="fc-period-detail">
+                  <span>{p.n_relevant} relevant</span>
+                  <span>Sentiment: {p.avg_sentiment >= 0 ? '+' : ''}{p.avg_sentiment.toFixed(2)}</span>
+                  {p.ret_after_horizon != null && (
+                    <span className={p.ret_after_horizon >= 0 ? 'up' : 'down'}>
+                      {forecast.window_days}D: {p.ret_after_horizon >= 0 ? '+' : ''}{p.ret_after_horizon.toFixed(1)}%
+                    </span>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Top Impact News */}
       {ns.top_impact && ns.top_impact.length > 0 && (
         <div className="fc-impact-section">
           <div className="fc-section-title">Key Impact News</div>
+          <div style={{ maxHeight: '400px', overflowY: 'auto' }}>
           {ns.top_impact.map((article) => {
             const retClass = (article.ret_t0 ?? 0) >= 0 ? 'up' : 'down';
             const deep = deepResults[article.news_id];
+            const deepError = deepErrors[article.news_id];
             const isAnalyzing = deepLoading === article.news_id;
             return (
               <div key={article.news_id} className={`fc-impact-card fc-impact-${retClass}`}>
@@ -410,7 +650,13 @@ function ForecastSection({
                   </span>
                   <span className="fc-impact-date">{article.date}</span>
                 </div>
-                <div className="fc-impact-title">{article.title}</div>
+                <div className="fc-impact-title">
+                  {article.article_url ? (
+                    <a href={article.article_url} target="_blank" rel="noopener noreferrer" style={{ color: 'inherit', textDecoration: 'underline', cursor: 'pointer' }}>
+                      {article.title}
+                    </a>
+                  ) : article.title}
+                </div>
                 {article.key_discussion && (
                   <div className="fc-impact-summary">{article.key_discussion}</div>
                 )}
@@ -430,18 +676,36 @@ function ForecastSection({
                       </div>
                     )}
                   </div>
+                ) : deepError ? (
+                  <div className="fc-deep-result">
+                    <div className="fc-deep-reasons fc-deep-bear">
+                      <span className="fc-deep-reasons-label">AI unavailable</span>
+                      <div className="fc-deep-reasons-text">{deepError}</div>
+                    </div>
+                  </div>
                 ) : (
                   <button
                     className="fc-deep-btn"
                     disabled={isAnalyzing}
                     onClick={() => {
                       setDeepLoading(article.news_id);
+                      setDeepErrors((prev) => {
+                        const next = { ...prev };
+                        delete next[article.news_id];
+                        return next;
+                      });
                       axios
                         .post('/api/analysis/deep', { news_id: article.news_id, symbol })
                         .then((res) => {
                           setDeepResults((prev) => ({ ...prev, [article.news_id]: res.data }));
                         })
-                        .catch(() => {})
+                        .catch((err) => {
+                          const msg =
+                            err?.response?.data?.detail ||
+                            err?.response?.data?.error ||
+                            'Deep analysis failed';
+                          setDeepErrors((prev) => ({ ...prev, [article.news_id]: msg }));
+                        })
                         .finally(() => setDeepLoading(null));
                     }}
                   >
@@ -451,66 +715,10 @@ function ForecastSection({
               </div>
             );
           })}
-        </div>
-      )}
-
-      {/* Similar historical periods */}
-      {stats.count > 0 && (
-        <div className="fc-similar-section">
-          <div className="fc-section-title">Similar Historical Periods ({stats.count})</div>
-          <div className="fc-similar-stats">
-            <div className="fc-stat">
-              <span className="fc-stat-label">5D Up Rate</span>
-              <span className={`fc-stat-value ${stats.up_ratio_5d > 0.5 ? 'up' : 'down'}`}>
-                {(stats.up_ratio_5d * 100).toFixed(0)}%
-              </span>
-            </div>
-            <div className="fc-stat">
-              <span className="fc-stat-label">Avg 5D Ret</span>
-              <span className={`fc-stat-value ${(stats.avg_ret_5d ?? 0) >= 0 ? 'up' : 'down'}`}>
-                {stats.avg_ret_5d != null ? `${stats.avg_ret_5d >= 0 ? '+' : ''}${stats.avg_ret_5d.toFixed(1)}%` : '-'}
-              </span>
-            </div>
-            <div className="fc-stat">
-              <span className="fc-stat-label">10D Up Rate</span>
-              <span className={`fc-stat-value ${stats.up_ratio_10d > 0.5 ? 'up' : 'down'}`}>
-                {(stats.up_ratio_10d * 100).toFixed(0)}%
-              </span>
-            </div>
-            <div className="fc-stat">
-              <span className="fc-stat-label">Avg 10D Ret</span>
-              <span className={`fc-stat-value ${(stats.avg_ret_10d ?? 0) >= 0 ? 'up' : 'down'}`}>
-                {stats.avg_ret_10d != null ? `${stats.avg_ret_10d >= 0 ? '+' : ''}${stats.avg_ret_10d.toFixed(1)}%` : '-'}
-              </span>
-            </div>
-          </div>
-
-          <div className="fc-periods-list">
-            {forecast.similar_periods.slice(0, 5).map((p, i) => (
-              <div key={i} className="fc-period-card">
-                <div className="fc-period-header">
-                  <span className="fc-period-dates">{p.period_start} ~ {p.period_end}</span>
-                  <span className="fc-period-sim">{(p.similarity * 100).toFixed(0)}% match</span>
-                </div>
-                <div className="fc-period-detail">
-                  <span>{p.n_articles} articles</span>
-                  <span>Sentiment: {p.avg_sentiment >= 0 ? '+' : ''}{p.avg_sentiment.toFixed(2)}</span>
-                  {p.ret_after_5d != null && (
-                    <span className={p.ret_after_5d >= 0 ? 'up' : 'down'}>
-                      5D: {p.ret_after_5d >= 0 ? '+' : ''}{p.ret_after_5d.toFixed(1)}%
-                    </span>
-                  )}
-                  {p.ret_after_10d != null && (
-                    <span className={p.ret_after_10d >= 0 ? 'up' : 'down'}>
-                      10D: {p.ret_after_10d >= 0 ? '+' : ''}{p.ret_after_10d.toFixed(1)}%
-                    </span>
-                  )}
-                </div>
-              </div>
-            ))}
           </div>
         </div>
       )}
+
     </div>
   );
 }
@@ -519,6 +727,7 @@ function PredictionCard({ label, pred }: { label: string; pred: HorizonPredictio
   const isUp = pred.direction === 'up';
   const hasAccuracy = pred.model_accuracy != null && pred.baseline_accuracy != null;
   const lift = hasAccuracy ? (pred.model_accuracy! - pred.baseline_accuracy!) : 0;
+  const beatsBaseline = hasAccuracy ? lift > 0 : false;
   const maxContrib = pred.top_drivers.length > 0
     ? Math.max(...pred.top_drivers.map((d) => d.contribution), 0.01)
     : 0.01;
@@ -531,11 +740,11 @@ function PredictionCard({ label, pred }: { label: string; pred: HorizonPredictio
         <span className={`fc-pred-dir ${isUp ? 'up' : 'down'}`}>
           {isUp ? '\u2191' : '\u2193'} {pred.direction.toUpperCase()}
         </span>
-        <span className="fc-pred-conf">{(pred.confidence * 100).toFixed(0)}%</span>
       </div>
       {hasAccuracy && (
         <div className="fc-pred-meta">
-          Acc {(pred.model_accuracy! * 100).toFixed(1)}% / Base {(pred.baseline_accuracy! * 100).toFixed(1)}% / Lift {lift >= 0 ? '+' : ''}{(lift * 100).toFixed(1)}pp
+          Conf {(pred.confidence * 100).toFixed(0)}% · Acc {(pred.model_accuracy! * 100).toFixed(1)}% / Base {(pred.baseline_accuracy! * 100).toFixed(1)}% / Lift {lift >= 0 ? '+' : ''}{(lift * 100).toFixed(1)}pp
+          {!beatsBaseline && ' · below baseline'}
         </div>
       )}
       {pred.top_drivers.length > 0 && (

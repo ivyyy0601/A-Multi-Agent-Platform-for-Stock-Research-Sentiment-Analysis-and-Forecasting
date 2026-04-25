@@ -11,12 +11,13 @@ import json
 import re
 from typing import List, Dict, Any
 
-import anthropic
+import requests
 
 from backend.config import settings
 from backend.database import get_conn
 
-MODEL = "claude-haiku-4-5-20251001"
+MODEL = "gemini-2.5-flash"
+GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
 BATCH_SIZE = 50  # articles per API call
 MAX_OUTPUT_TOKENS = 4096  # enough for 50 articles (~70 tokens each)
 
@@ -108,8 +109,13 @@ Format: [{{"i":0,"r":"y"|"n","s":"+"|"-"|"0","e":"summary","u":"up reason","d":"
 r: "y" = article specifically discusses {symbol}, "n" = irrelevant/brief mention
 s: "+" positive, "-" negative, "0" neutral
 e: 10-word summary of what happened (empty if irrelevant)
-u: why this could push {symbol} stock UP, e.g. "strong earnings beat expectations" (empty if none or irrelevant)
-d: why this could push {symbol} stock DOWN, e.g. "antitrust lawsuit threatens App Store revenue" (empty if none or irrelevant)
+u: why this could push {symbol} stock UP; leave EMPTY unless the article clearly contains a bullish driver
+d: why this could push {symbol} stock DOWN; leave EMPTY unless the article clearly contains a bearish driver
+Important:
+- If the article is mainly good for {symbol}, set s="+", fill u, leave d empty.
+- If the article is mainly bad for {symbol}, set s="-", fill d, leave u empty.
+- Only use s="0" when the article is genuinely mixed or balanced; in that case both u and d may be filled.
+- Do not invent both sides just to be complete.
 JSON:"""
 
 
@@ -135,21 +141,24 @@ def process_batch_group(
     symbol: str, articles: List[Dict[str, Any]]
 ) -> Dict[str, int]:
     """Process a group of up to 50 articles in a single API call."""
-    client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
     conn = get_conn()
-
     stats = {"processed": 0, "relevant": 0, "irrelevant": 0, "errors": 0}
-
     prompt = _build_batch_prompt(symbol, articles)
 
     try:
-        message = client.messages.create(
-            model=MODEL,
-            max_tokens=MAX_OUTPUT_TOKENS,
-            messages=[{"role": "user", "content": prompt}],
+        url = GEMINI_URL.format(model=MODEL)
+        resp = requests.post(
+            url,
+            params={"key": settings.gemini_api_key},
+            json={
+                "contents": [{"parts": [{"text": prompt}]}],
+                "generationConfig": {"maxOutputTokens": MAX_OUTPUT_TOKENS},
+            },
+            timeout=60,
         )
-
-        text = message.content[0].text if message.content else "[]"
+        resp.raise_for_status()
+        candidates = resp.json().get("candidates", [])
+        text = candidates[0]["content"]["parts"][0]["text"] if candidates else "[]"
 
         # Parse JSON array
         start = text.find("[")
@@ -194,7 +203,7 @@ def process_batch_group(
             else:
                 stats["irrelevant"] += 1
 
-    except (json.JSONDecodeError, KeyError, anthropic.APIError) as e:
+    except (json.JSONDecodeError, KeyError, requests.RequestException) as e:
         stats["errors"] = len(articles)
         print(f"Batch error for {symbol}: {e}")
 

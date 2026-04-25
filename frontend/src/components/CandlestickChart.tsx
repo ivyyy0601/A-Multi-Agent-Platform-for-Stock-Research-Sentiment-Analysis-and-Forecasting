@@ -14,6 +14,7 @@ interface OHLCRow {
 interface Particle {
   id: string;
   d: string;   // trade_date
+  pd: string;  // actual published date (for x positioning)
   s: string | null;  // sentiment
   r: string | null;  // relevance
   t: string;   // title (truncated)
@@ -45,8 +46,8 @@ interface ArticleSelection {
 interface Props {
   symbol: string;
   lockedNewsId?: string | null;
-  highlightedArticleIds?: string[] | null;
-  highlightColor?: string | null;
+  sourceFilter?: 'all' | 'news' | 'reddit';
+  sentimentFilter?: 'all' | 'positive' | 'negative' | 'neutral';
   onHover: (date: string | null, ohlc?: HoverData) => void;
   onRangeSelect?: (range: RangeSelection | null) => void;
   onArticleSelect?: (article: ArticleSelection | null) => void;
@@ -84,12 +85,25 @@ interface PlacedParticle extends Particle {
   alpha: number;
 }
 
-export default function CandlestickChart({ symbol, lockedNewsId, highlightedArticleIds, highlightColor, onHover, onRangeSelect, onArticleSelect, onDayClick }: Props) {
+type TimeRange = 'all' | '90d' | '60d' | '30d' | '7d';
+const TIME_RANGE_DAYS: Record<TimeRange, number | null> = {
+  all: null, '90d': 90, '60d': 60, '30d': 30, '7d': 7,
+};
+
+function parseDateOnly(value: string): Date {
+  const [year, month, day] = value.split('-').map(Number);
+  return new Date(year, month - 1, day);
+}
+
+export default function CandlestickChart({ symbol, lockedNewsId, sourceFilter = 'all', sentimentFilter = 'all', onHover, onRangeSelect, onArticleSelect, onDayClick }: Props) {
   const svgRef = useRef<SVGSVGElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const tooltipRef = useRef<HTMLDivElement>(null);
   const [loading, setLoading] = useState(false);
+  const [timeRange, setTimeRange] = useState<TimeRange>('90d');
+  const allOhlcRef = useRef<OHLCRow[]>([]);
+  const allParticlesRef = useRef<Particle[]>([]);
 
   // Refs for interaction state (avoid re-renders)
   const placedRef = useRef<PlacedParticle[]>([]);
@@ -97,7 +111,8 @@ export default function CandlestickChart({ symbol, lockedNewsId, highlightedArti
   const hoveredParticleRef = useRef<PlacedParticle | null>(null);
   const lockedNewsIdRef = useRef<string | null>(null);
   const highlightedIdsRef = useRef<Set<string> | null>(null);
-  const highlightColorRef = useRef<string | null>(null);
+  const sourceFilterRef = useRef<'all' | 'news' | 'reddit'>('all');
+  const sentimentFilterRef = useRef<'all' | 'positive' | 'negative' | 'neutral'>('all');
   const marginRef = useRef({ top: 16, right: 40, bottom: 24, left: 48 });
 
   // Keep refs in sync with props
@@ -107,12 +122,14 @@ export default function CandlestickChart({ symbol, lockedNewsId, highlightedArti
   }, [lockedNewsId]);
 
   useEffect(() => {
-    highlightedIdsRef.current = highlightedArticleIds && highlightedArticleIds.length > 0
-      ? new Set(highlightedArticleIds)
-      : null;
-    highlightColorRef.current = highlightColor ?? null;
+    sourceFilterRef.current = sourceFilter;
     drawParticles(hoveredParticleRef.current);
-  }, [highlightedArticleIds, highlightColor]);
+  }, [sourceFilter]);
+
+  useEffect(() => {
+    sentimentFilterRef.current = sentimentFilter;
+    drawParticles(hoveredParticleRef.current);
+  }, [sentimentFilter]);
 
   const drawParticles = useCallback((highlight: PlacedParticle | null = null) => {
     const canvas = canvasRef.current;
@@ -121,69 +138,51 @@ export default function CandlestickChart({ symbol, lockedNewsId, highlightedArti
     if (!ctx) return;
     const dpr = window.devicePixelRatio || 1;
     const locked = lockedNewsIdRef.current;
-    const hlSet = highlightedIdsRef.current; // category highlight set
-    const hlColor = highlightColorRef.current;
 
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
     const placed = placedRef.current;
+    const sf = sourceFilterRef.current;
+    const smf = sentimentFilterRef.current;
     for (const p of placed) {
       const isLocked = locked != null && p.id === locked;
       const isHover = p === highlight;
-      const isCategoryMatch = hlSet != null && hlSet.has(p.id);
-      const hasCategoryFilter = hlSet != null;
 
-      // Category filter: hide non-matching particles entirely
-      if (hasCategoryFilter && !isCategoryMatch && !isLocked && !isHover) {
-        continue;
+      if (!isLocked && !isHover) {
+        // Source filter
+        const isReddit = p.id.startsWith('reddit_');
+        if (sf === 'reddit' && !isReddit) continue;
+        if (sf === 'news' && isReddit) continue;
+        // Sentiment filter
+        if (smf === 'all') {
+          if (p.s !== 'positive' && p.s !== 'negative') continue;
+        } else {
+          if (p.s !== smf) continue;
+        }
       }
 
-      let alpha = p.alpha;
-      if (isCategoryMatch && hasCategoryFilter) alpha = 1;
-      if (isHover || isLocked) alpha = 1;
-      ctx.globalAlpha = alpha;
+      ctx.globalAlpha = isHover || isLocked ? 1 : p.alpha;
+      ctx.fillStyle = p.color;
 
-      // Determine radius: category-matched gets a boost
-      let radius = p.radius;
-      if (isCategoryMatch && hasCategoryFilter) {
-        radius = Math.max(p.radius, 3.5);
-      }
-
-      // Use category theme color for matched particles, otherwise original
-      ctx.fillStyle = (isCategoryMatch && hasCategoryFilter && hlColor) ? hlColor : p.color;
-
-      if (isHover || isLocked || (isCategoryMatch && hasCategoryFilter)) {
-        const glowColor = isLocked ? '#00e5ff' : (isCategoryMatch && hlColor) ? hlColor : p.color;
-        ctx.shadowColor = glowColor;
-        ctx.shadowBlur = (isLocked || isHover ? 14 : 8) * dpr;
+      if (isHover || isLocked) {
+        ctx.shadowColor = isLocked ? '#00e5ff' : p.color;
+        ctx.shadowBlur = 14 * dpr;
       } else {
         ctx.shadowColor = 'transparent';
         ctx.shadowBlur = 0;
       }
 
       ctx.beginPath();
-      ctx.arc(p.px * dpr, p.py * dpr, radius * dpr, 0, Math.PI * 2);
+      ctx.arc(p.px * dpr, p.py * dpr, p.radius * dpr, 0, Math.PI * 2);
       ctx.fill();
 
-      // Draw cyan ring for locked particle
       if (isLocked) {
         ctx.shadowColor = '#00e5ff';
         ctx.shadowBlur = 10 * dpr;
         ctx.strokeStyle = '#00e5ff';
         ctx.lineWidth = 1.5 * dpr;
         ctx.beginPath();
-        ctx.arc(p.px * dpr, p.py * dpr, (radius + 3) * dpr, 0, Math.PI * 2);
-        ctx.stroke();
-      }
-
-      // Draw ring for category-highlighted particles using category color
-      if (isCategoryMatch && hasCategoryFilter && !isLocked) {
-        ctx.shadowColor = 'transparent';
-        ctx.shadowBlur = 0;
-        ctx.strokeStyle = hlColor ? `${hlColor}99` : 'rgba(102, 126, 234, 0.6)';
-        ctx.lineWidth = 1 * dpr;
-        ctx.beginPath();
-        ctx.arc(p.px * dpr, p.py * dpr, (radius + 2) * dpr, 0, Math.PI * 2);
+        ctx.arc(p.px * dpr, p.py * dpr, (p.radius + 3) * dpr, 0, Math.PI * 2);
         ctx.stroke();
       }
     }
@@ -193,20 +192,44 @@ export default function CandlestickChart({ symbol, lockedNewsId, highlightedArti
     ctx.shadowBlur = 0;
   }, []);
 
+  function filterByRange(ohlc: OHLCRow[], particles: Particle[], range: TimeRange) {
+    const days = TIME_RANGE_DAYS[range];
+    if (!days) return { ohlc, particles };
+    // Use last N trading days (data points), not calendar days
+    const sliced = ohlc.slice(-days);
+    const cutoffStr = sliced.length > 0 ? sliced[0].date : '';
+    return {
+      ohlc: sliced,
+      particles: particles.filter((p) => (p.pd || p.d) >= cutoffStr),
+    };
+  }
+
   useEffect(() => {
     if (!symbol) return;
     setLoading(true);
 
     Promise.all([
       axios.get<OHLCRow[]>(`/api/stocks/${symbol}/ohlc`),
-      axios.get<Particle[]>(`/api/news/${symbol}/particles`),
+      axios.get<Particle[]>(`/api/news/${symbol}/particles`).catch((err) => {
+        console.error('Particle load error:', err);
+        return { data: [] as Particle[] };
+      }),
     ])
       .then(([ohlcRes, particlesRes]) => {
-        drawChart(ohlcRes.data, particlesRes.data);
+        allOhlcRef.current = ohlcRes.data;
+        allParticlesRef.current = particlesRes.data;
+        const { ohlc, particles } = filterByRange(ohlcRes.data, particlesRes.data, timeRange);
+        drawChart(ohlc, particles);
       })
       .catch((err) => console.error('Chart error:', err))
       .finally(() => setLoading(false));
   }, [symbol]);
+
+  useEffect(() => {
+    if (!allOhlcRef.current.length) return;
+    const { ohlc, particles } = filterByRange(allOhlcRef.current, allParticlesRef.current, timeRange);
+    drawChart(ohlc, particles);
+  }, [timeRange]);
 
   function drawChart(rawData: OHLCRow[], particles: Particle[]) {
     const svg = d3.select(svgRef.current);
@@ -226,7 +249,7 @@ export default function CandlestickChart({ symbol, lockedNewsId, highlightedArti
     const g = svg.append('g').attr('transform', `translate(${margin.left},${margin.top})`);
 
     const data = rawData.map((d, i) => ({
-      date: new Date(d.date),
+      date: parseDateOnly(d.date),
       dateStr: d.date,
       open: +d.open,
       high: +d.high,
@@ -243,8 +266,11 @@ export default function CandlestickChart({ symbol, lockedNewsId, highlightedArti
     }
 
     // Scales — full height, no split
+    // Extend x domain 3 days past last candle so weekend/holiday particles are visible
+    const [xMin, xMax] = d3.extent(data, (d) => d.date) as [Date, Date];
+    const xMaxExtended = new Date(xMax.getTime() + 3 * 24 * 60 * 60 * 1000);
     const x = d3.scaleTime()
-      .domain(d3.extent(data, (d) => d.date) as [Date, Date])
+      .domain([xMin, xMaxExtended])
       .range([0, width]);
 
     const y = d3.scaleLinear()
@@ -265,10 +291,14 @@ export default function CandlestickChart({ symbol, lockedNewsId, highlightedArti
       .style('stroke-width', 1);
     g.selectAll('.grid-y .domain').remove();
 
-    // X Axis
+    // X Axis — adaptive ticks and format based on data length
+    const xTickCount = data.length <= 10 ? data.length : data.length <= 60 ? 6 : 8;
+    const xFmt = data.length <= 60
+      ? d3.timeFormat('%m/%d')
+      : d3.timeFormat('%b %y');
     g.append('g')
       .attr('transform', `translate(0,${height})`)
-      .call(d3.axisBottom(x).ticks(8).tickFormat(d3.timeFormat('%b %y') as any))
+      .call(d3.axisBottom(x).ticks(xTickCount).tickFormat(xFmt as any))
       .selectAll('text')
       .style('font-size', '12px')
       .style('fill', '#555');
@@ -283,7 +313,7 @@ export default function CandlestickChart({ symbol, lockedNewsId, highlightedArti
     g.selectAll('.domain').style('stroke', '#1a2030');
     g.selectAll('.tick line').style('stroke', '#1a2030');
 
-    const candleWidth = Math.max(1.5, (width / data.length) * 0.65);
+    const candleWidth = Math.max(1.5, Math.min(18, (width / data.length) * 0.65));
 
     // Candlesticks
     const candles = g.selectAll('.candle').data(data).enter().append('g').attr('class', 'candle');
@@ -306,13 +336,17 @@ export default function CandlestickChart({ symbol, lockedNewsId, highlightedArti
       .attr('fill', (d) => (d.close >= d.open ? '#00e676' : '#ff5252'));
 
     // --- Place particles overlaid on K-line ---
-    // Group particles by trade_date
+    // Group particles by actual published date (pd) for x positioning
     const particlesByDate = new Map<string, Particle[]>();
     for (const p of particles) {
-      const arr = particlesByDate.get(p.d) || [];
+      const key = p.pd || p.d;
+      const arr = particlesByDate.get(key) || [];
       arr.push(p);
-      particlesByDate.set(p.d, arr);
+      particlesByDate.set(key, arr);
     }
+
+    // Sorted dates for finding nearest trading day
+    const sortedDates = data.map((d) => d.date.getTime()).sort((a, b) => a - b);
 
     const placed: PlacedParticle[] = [];
     // Particle vertical spacing in pixels
@@ -320,9 +354,9 @@ export default function CandlestickChart({ symbol, lockedNewsId, highlightedArti
 
     for (const [dateStr, pArr] of particlesByDate) {
       const ohlc = dateToOhlc.get(dateStr);
-      if (!ohlc) continue;
 
-      const cx = x(ohlc.date);
+      // For weekend/holiday dates: use time scale x, nearest trading day y
+      const cx = ohlc ? x(ohlc.date) : x(parseDateOnly(dateStr));
 
       // Sort: relevant first, then by |ret_t1| descending
       pArr.sort((a, b) => {
@@ -332,13 +366,23 @@ export default function CandlestickChart({ symbol, lockedNewsId, highlightedArti
         return Math.abs(b.rt1 || 0) - Math.abs(a.rt1 || 0);
       });
 
-      // Stack particles downward from the close price (like dangling below the candle)
+      // Stack particles downward from the candle low (or nearest trading day's low for weekend)
+      let baseY: number;
+      if (ohlc) {
+        baseY = y(ohlc.low);
+      } else {
+        const t = parseDateOnly(dateStr).getTime();
+        const nearest = sortedDates.reduce((prev, cur) =>
+          Math.abs(cur - t) < Math.abs(prev - t) ? cur : prev
+        );
+        const nearestDate = data.find((d) => d.date.getTime() === nearest);
+        const nearestOhlc = nearestDate ? dateToOhlc.get(nearestDate.dateStr) : undefined;
+        baseY = nearestOhlc ? y(nearestOhlc.low) : y((d3.min(data, (d) => d.low)! + d3.max(data, (d) => d.high)!) / 2);
+      }
       for (let i = 0; i < pArr.length; i++) {
         const p = pArr[i];
         const radius = getParticleRadius(p.r, p.rt1);
-        // First particle starts just below the candle low, then stack downward
-        const candleLowY = y(ohlc.low);
-        const py = margin.top + candleLowY + 6 + i * pSpacing;
+        const py = margin.top + baseY + 6 + i * pSpacing;
 
         // Don't render if beyond chart bottom
         if (py > margin.top + height + 10) break;
@@ -604,14 +648,27 @@ export default function CandlestickChart({ symbol, lockedNewsId, highlightedArti
   }
 
   return (
-    <div ref={containerRef} className="chart-container">
-      {loading && <div className="chart-loading">Loading...</div>}
-      <svg ref={svgRef}></svg>
-      <canvas
-        ref={canvasRef}
-        className="particle-layer"
-      />
-      <div ref={tooltipRef} className="particle-tooltip" style={{ display: 'none' }} />
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+      <div className="chart-time-range">
+        {(['7d', '30d', '60d', '90d', 'all'] as TimeRange[]).map((r) => (
+          <button
+            key={r}
+            className={`chart-range-btn ${timeRange === r ? 'active' : ''}`}
+            onClick={() => setTimeRange(r)}
+          >
+            {r === 'all' ? 'All' : r.toUpperCase()}
+          </button>
+        ))}
+      </div>
+      <div ref={containerRef} className="chart-container" style={{ flex: 1 }}>
+        {loading && <div className="chart-loading">Loading...</div>}
+        <svg ref={svgRef}></svg>
+        <canvas
+          ref={canvasRef}
+          className="particle-layer"
+        />
+        <div ref={tooltipRef} className="particle-tooltip" style={{ display: 'none' }} />
+      </div>
     </div>
   );
 }

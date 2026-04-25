@@ -2,21 +2,32 @@ import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 
 export default defineConfig({
-  base: '/PokieTicker/',
-  plugins: [react()],
+  base: '/',
+  plugins: [
+    react({
+      babel: {
+        plugins: [['babel-plugin-react-compiler']],
+      },
+    }),
+  ],
   server: {
     port: 7777,
     proxy: {
-      '/PokieTicker/api': {
-        target: process.env.VITE_API_TARGET || 'http://127.0.0.1:8000',
+      // Analysis backend (port 8001) — must be before /api
+      '/api/v1': {
+        target: 'http://127.0.0.1:8001',
         changeOrigin: true,
-        secure: true,
-        rewrite: (path) => path.replace(/^\/PokieTicker/, ''),
       },
+      // Main PokieTicker backend (port 8000)
       '/api': {
-        target: process.env.VITE_API_TARGET || 'http://127.0.0.1:8000',
+        target: 'http://127.0.0.1:8000',
         changeOrigin: true,
-        secure: true,
+      },
+      // Adanos external API proxy (avoids browser CORS)
+      '/adanos': {
+        target: 'https://api.adanos.org',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/adanos/, ''),
       },
     },
   },

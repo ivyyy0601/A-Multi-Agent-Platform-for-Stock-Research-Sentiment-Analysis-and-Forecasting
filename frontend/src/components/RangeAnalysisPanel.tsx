@@ -35,7 +35,20 @@ export default function RangeAnalysisPanel({ symbol, startDate, endDate, questio
   const [data, setData] = useState<RangeAnalysis | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [usedFallback, setUsedFallback] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
+
+  const hasUsefulAnalysis = (payload: RangeAnalysis | null) => {
+    if (!payload || payload.error || !payload.analysis) return false;
+    const a = payload.analysis;
+    return Boolean(
+      a.summary ||
+      (a.key_events && a.key_events.length > 0) ||
+      (a.bullish_factors && a.bullish_factors.length > 0) ||
+      (a.bearish_factors && a.bearish_factors.length > 0) ||
+      a.trend_analysis
+    );
+  };
 
   useEffect(() => {
     abortRef.current?.abort();
@@ -45,24 +58,38 @@ export default function RangeAnalysisPanel({ symbol, startDate, endDate, questio
     setLoading(true);
     setError(null);
     setData(null);
+    setUsedFallback(false);
+
+    const payload = { symbol, start_date: startDate, end_date: endDate, question };
 
     axios
-      .post<RangeAnalysis>(
-        '/api/analysis/range',
-        { symbol, start_date: startDate, end_date: endDate, question },
-        { signal: controller.signal }
-      )
+      .post<RangeAnalysis>('/api/analysis/range', payload, { signal: controller.signal })
       .then((res) => {
         if (res.data.error) {
           setError(res.data.error);
+        } else if (!hasUsefulAnalysis(res.data)) {
+          throw new Error('Empty AI analysis');
         } else {
           setData(res.data);
         }
       })
       .catch((err) => {
-        if (!axios.isCancel(err)) {
-          setError('Analysis failed');
-        }
+        if (axios.isCancel(err)) return;
+        return axios
+          .post<RangeAnalysis>('/api/analysis/range-local', payload, { signal: controller.signal })
+          .then((res) => {
+            if (res.data.error) {
+              setError(res.data.error);
+            } else {
+              setUsedFallback(true);
+              setData(res.data);
+            }
+          })
+          .catch((fallbackErr) => {
+            if (!axios.isCancel(fallbackErr)) {
+              setError('Analysis failed');
+            }
+          });
       })
       .finally(() => setLoading(false));
 
@@ -105,6 +132,11 @@ export default function RangeAnalysisPanel({ symbol, startDate, endDate, questio
           {/* Price summary card */}
           <div className="range-price-card">
             <div className="range-dates">{data.start_date} to {data.end_date}</div>
+            {usedFallback && (
+              <div className="range-meta" style={{ marginBottom: 8, color: '#caa96b' }}>
+                AI unavailable, showing local analysis
+              </div>
+            )}
             <div className="range-price-row">
               <span className="range-price">${data.open_price.toFixed(2)} → ${data.close_price.toFixed(2)}</span>
               <span className={`range-change ${isUp ? 'up' : 'down'}`}>

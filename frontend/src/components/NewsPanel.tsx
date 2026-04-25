@@ -29,7 +29,10 @@ interface Props {
   highlightedNewsId?: string | null;
   isLocked?: boolean;
   onUnlock?: () => void;
-  highlightedCategoryIds?: string[];
+  sourceFilter?: 'all' | 'news' | 'reddit';
+  onSourceFilterChange?: (f: 'all' | 'news' | 'reddit') => void;
+  sentimentFilter?: 'all' | 'positive' | 'negative' | 'neutral';
+  onSentimentFilterChange?: (f: 'all' | 'positive' | 'negative' | 'neutral') => void;
 }
 
 function sortBySentiment(items: NewsItem[]): NewsItem[] {
@@ -48,7 +51,7 @@ function pct(v: number | null) {
   return <span style={{ color, fontWeight: 600 }}>{pctVal > 0 ? '+' : ''}{pctVal.toFixed(2)}%</span>;
 }
 
-export default function NewsPanel({ symbol, hoveredDate, onFindSimilar, highlightedNewsId, isLocked, onUnlock, highlightedCategoryIds }: Props) {
+export default function NewsPanel({ symbol, hoveredDate, onFindSimilar, highlightedNewsId, isLocked, onUnlock, sourceFilter = 'all', onSourceFilterChange, sentimentFilter = 'all', onSentimentFilterChange }: Props) {
   const [news, setNews] = useState<NewsItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [displayDate, setDisplayDate] = useState<string | null>(null);
@@ -102,13 +105,12 @@ export default function NewsPanel({ symbol, hoveredDate, onFindSimilar, highligh
     }
   }, [highlightedNewsId, news]);
 
-  const categorySet = highlightedCategoryIds && highlightedCategoryIds.length > 0
-    ? new Set(highlightedCategoryIds)
-    : null;
-
-  // If category filter is active but NO articles on this date match, disable dimming
-  const hasAnyMatch = categorySet != null && news.some((item) => categorySet.has(item.news_id));
-  const effectiveCategorySet = (categorySet != null && !hasAnyMatch) ? null : categorySet;
+  const filteredNews = news.filter((item) => {
+    if (sourceFilter === 'reddit' && !item.publisher?.startsWith('Reddit')) return false;
+    if (sourceFilter === 'news' && item.publisher?.startsWith('Reddit')) return false;
+    if (sentimentFilter !== 'all' && item.sentiment !== sentimentFilter) return false;
+    return true;
+  });
 
   if (!displayDate) {
     return (
@@ -126,27 +128,37 @@ export default function NewsPanel({ symbol, hoveredDate, onFindSimilar, highligh
       <div className="news-panel-header">
         <h2>News</h2>
         <span className="news-date-badge">{displayDate}</span>
-        <span className="news-count">{news.length} articles</span>
+        <span className="news-count">{filteredNews.length} articles</span>
         {isLocked && (
           <button className="lock-badge" onClick={onUnlock} title="Click to unlock">
             Locked
           </button>
         )}
       </div>
+      <div className="news-source-tabs">
+        <button className={`news-source-tab ${sourceFilter === 'all' ? 'active' : ''}`} onClick={() => onSourceFilterChange?.('all')}>All</button>
+        <button className={`news-source-tab ${sourceFilter === 'news' ? 'active' : ''}`} onClick={() => onSourceFilterChange?.('news')}>News</button>
+        <button className={`news-source-tab ${sourceFilter === 'reddit' ? 'active' : ''}`} onClick={() => onSourceFilterChange?.('reddit')}>Reddit</button>
+      </div>
+      <div className="news-source-tabs">
+        <button className={`news-source-tab ${sentimentFilter === 'all' ? 'active' : ''}`} onClick={() => onSentimentFilterChange?.('all')}>All</button>
+        <button className={`news-source-tab sentiment-pos ${sentimentFilter === 'positive' ? 'active' : ''}`} onClick={() => onSentimentFilterChange?.('positive')}>▲ Positive</button>
+        <button className={`news-source-tab sentiment-neg ${sentimentFilter === 'negative' ? 'active' : ''}`} onClick={() => onSentimentFilterChange?.('negative')}>▼ Negative</button>
+        <button className={`news-source-tab ${sentimentFilter === 'neutral' ? 'active' : ''}`} onClick={() => onSentimentFilterChange?.('neutral')}>Neutral</button>
+      </div>
 
       {loading && news.length === 0 ? (
         <div className="news-empty">Loading...</div>
-      ) : news.length === 0 ? (
-        <div className="news-empty">No news for this date</div>
+      ) : filteredNews.length === 0 ? (
+        <div className="news-empty">No {sourceFilter === 'reddit' ? 'Reddit posts' : sourceFilter === 'news' ? 'news articles' : 'news'} for this date</div>
       ) : (
         <div className="news-list" ref={listRef}>
-          {news.map((item) => {
-            const isDimmed = effectiveCategorySet != null && !effectiveCategorySet.has(item.news_id);
+          {filteredNews.map((item) => {
             return (
               <div
                 key={item.news_id}
                 data-news-id={item.news_id}
-                className={`news-card ${item.sentiment === 'positive' ? 'card-positive' : item.sentiment === 'negative' ? 'card-negative' : 'card-neutral'}${highlightedNewsId === item.news_id ? ' card-highlighted' : ''}${isDimmed ? ' card-dimmed' : ''}`}
+                className={`news-card ${item.sentiment === 'positive' ? 'card-positive' : item.sentiment === 'negative' ? 'card-negative' : 'card-neutral'}${highlightedNewsId === item.news_id ? ' card-highlighted' : ''}`}
               >
                 <div className="news-card-top">
                   <span className={`sentiment-dot ${item.sentiment || 'neutral'}`} />

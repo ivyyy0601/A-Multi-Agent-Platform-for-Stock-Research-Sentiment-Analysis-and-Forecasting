@@ -8,12 +8,55 @@ import json
 from typing import Dict, Any, Optional, List
 from datetime import datetime, timezone
 
-import anthropic
+import requests
 
 from backend.config import settings
 from backend.database import get_conn
 
-MODEL = "claude-sonnet-4-5-20250929"
+MODEL = "gemini-2.5-flash"
+GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
+
+
+def _gemini(prompt: str, max_tokens: int = 2048) -> str:
+    resp = requests.post(
+        GEMINI_URL.format(model=MODEL),
+        params={"key": settings.gemini_api_key},
+        json={
+            "contents": [{"parts": [{"text": prompt}]}],
+            "generationConfig": {"maxOutputTokens": max_tokens},
+        },
+        timeout=60,
+    )
+    resp.raise_for_status()
+    payload = resp.json()
+    candidates = payload.get("candidates", [])
+    if not candidates:
+        raise RuntimeError("Empty Gemini response")
+    candidate = candidates[0]
+    parts = candidate.get("content", {}).get("parts", [])
+    text = parts[0].get("text", "") if parts else ""
+    if not text.strip():
+        raise RuntimeError("Empty Gemini text")
+    return text
+
+
+def _extract_json_text(text: str) -> dict:
+    start = text.find("{")
+    end = text.rfind("}") + 1
+    if start >= 0 and end > start:
+        return json.loads(text[start:end])
+    raise json.JSONDecodeError("No complete JSON object found", text, 0)
+
+
+def _gemini_json(prompt: str, max_tokens: int, retry_tokens: int | None = None) -> dict:
+    text = _gemini(prompt, max_tokens=max_tokens)
+    try:
+        return _extract_json_text(text)
+    except json.JSONDecodeError:
+        if retry_tokens and retry_tokens > max_tokens:
+            text = _gemini(prompt, max_tokens=retry_tokens)
+            return _extract_json_text(text)
+        raise
 
 
 def get_cached(news_id: str, symbol: str) -> Optional[Dict[str, Any]]:
@@ -46,8 +89,6 @@ def analyze_article(news_id: str, symbol: str) -> Dict[str, Any]:
     if not article:
         return {"error": "Article not found"}
 
-    client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
-
     prompt = f"""You are a senior financial analyst. Provide a deep analysis of this news article's impact on {symbol} stock.
 
 TITLE: {article['title']}
@@ -63,19 +104,19 @@ Provide your analysis as JSON:
 
 Respond with JSON only."""
 
-    message = client.messages.create(
-        model=MODEL,
-        max_tokens=1024,
-        messages=[{"role": "user", "content": prompt}],
-    )
-
-    text = message.content[0].text if message.content else ""
+    parsed = _gemini_json(prompt, max_tokens=2048, retry_tokens=4096)
     try:
-        start = text.find("{")
-        end = text.rfind("}") + 1
-        parsed = json.loads(text[start:end]) if start >= 0 and end > start else {}
+        parsed = parsed or {}
     except json.JSONDecodeError:
-        parsed = {"discussion": text, "growth_reasons": "", "decrease_reasons": ""}
+        parsed = {"discussion": "", "growth_reasons": "", "decrease_reasons": ""}
+
+    if not any((parsed.get("discussion"), parsed.get("growth_reasons"), parsed.get("decrease_reasons"))):
+        raise RuntimeError("Deep analysis returned empty content")
+
+    def _to_str(val):
+        if isinstance(val, list):
+            return "\n".join(str(v) for v in val)
+        return val or ""
 
     # Cache result
     conn = get_conn()
@@ -86,9 +127,9 @@ Respond with JSON only."""
         (
             news_id,
             symbol,
-            parsed.get("discussion", ""),
-            parsed.get("growth_reasons", ""),
-            parsed.get("decrease_reasons", ""),
+            _to_str(parsed.get("discussion")),
+            _to_str(parsed.get("growth_reasons")),
+            _to_str(parsed.get("decrease_reasons")),
             datetime.now(timezone.utc).isoformat(),
         ),
     )
@@ -105,16 +146,8 @@ Respond with JSON only."""
 
 
 def generate_story(symbol: str, csv_content: str) -> str:
-    """Generate an AI story about stock price movements. Port from app.py."""
-    client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
-
-    message = client.messages.create(
-        model=MODEL,
-        max_tokens=4096,
-        messages=[
-            {
-                "role": "user",
-                "content": f"""Below is {symbol}'s OHLC data and related news. Please generate a compelling investment story based on this data.
+    """Generate an AI story about stock price movements."""
+    prompt = f"""Below is {symbol}'s OHLC data and related news. Please generate a compelling investment story based on this data.
 
 Data:
 ```
@@ -132,12 +165,9 @@ Write in English, approximately 500-1000 words, with vivid and narrative languag
 - Major price volatility periods with a timeline
 - Impact of key news events
 - Comparisons with competitors
-- Regulatory environment and policy impacts""",
-            }
-        ],
-    )
+- Regulatory environment and policy impacts"""
 
-    return message.content[0].text if message.content else ""
+    return _gemini(prompt, max_tokens=4096)
 
 
 def analyze_range(symbol: str, start_date: str, end_date: str, question: Optional[str] = None) -> Dict[str, Any]:
@@ -191,8 +221,6 @@ def analyze_range(symbol: str, start_date: str, end_date: str, question: Optiona
     # Build OHLC summary
     ohlc_summary = f"Open: ${open_price:.2f}, Close: ${close_price:.2f}, High: ${high_price:.2f}, Low: ${low_price:.2f}, Change: {price_change_pct:+.2f}%, Trading days: {len(ohlc_rows)}"
 
-    client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
-
     question_part = f"The user's specific question is: {question}. Please focus on answering this question in your analysis.\n\n" if question else ""
 
     prompt = f"""You are a senior financial analyst. Please analyze {symbol}'s stock price movement from {start_date} to {end_date}.
@@ -214,25 +242,26 @@ Related news during this period ({news_count} articles):
 
 Return JSON only."""
 
-    message = client.messages.create(
-        model=MODEL,
-        max_tokens=2048,
-        messages=[{"role": "user", "content": prompt}],
-    )
-
-    text = message.content[0].text if message.content else ""
+    analysis = _gemini_json(prompt, max_tokens=4096, retry_tokens=6144)
     try:
-        start_idx = text.find("{")
-        end_idx = text.rfind("}") + 1
-        analysis = json.loads(text[start_idx:end_idx]) if start_idx >= 0 and end_idx > start_idx else {}
+        analysis = analysis or {}
     except json.JSONDecodeError:
         analysis = {
-            "summary": text[:100],
+            "summary": "",
             "key_events": [],
             "bullish_factors": [],
             "bearish_factors": [],
-            "trend_analysis": text,
+            "trend_analysis": "",
         }
+
+    if not any((
+        analysis.get("summary"),
+        analysis.get("key_events"),
+        analysis.get("bullish_factors"),
+        analysis.get("bearish_factors"),
+        analysis.get("trend_analysis"),
+    )):
+        raise RuntimeError("Range analysis returned empty content")
 
     return {
         "symbol": symbol,

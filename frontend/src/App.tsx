@@ -1,15 +1,23 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, lazy, Suspense } from 'react';
+import AppNav from './components/AppNav';
 import axios from 'axios';
 import StockSelector from './components/StockSelector';
 import CandlestickChart from './components/CandlestickChart';
 import NewsPanel from './components/NewsPanel';
-import NewsCategoryPanel from './components/NewsCategoryPanel';
 import RangeAnalysisPanel from './components/RangeAnalysisPanel';
 import RangeQueryPopup from './components/RangeQueryPopup';
 import RangeNewsPanel from './components/RangeNewsPanel';
 import SimilarDaysPanel from './components/SimilarDaysPanel';
 import PredictionPanel from './components/PredictionPanel';
+import DatePickerPopup from './components/DatePickerPopup';
 import './App.css';
+
+const AnalysisApp = lazy(() => import('./views/analysis/AnalysisApp'));
+const SentimentApp = lazy(() => import('./views/sentiment/SentimentApp'));
+const SocialApp = lazy(() => import('./views/social/SocialApp'));
+const TeamApp = lazy(() => import('./views/team/TeamApp'));
+const AutomationApp = lazy(() => import('./views/automation/AutomationApp'));
+const OverallApp = lazy(() => import('./views/overall/OverallApp'));
 
 interface RangeSelection {
   startDate: string;
@@ -40,16 +48,17 @@ function App() {
   const [rangeQuestion, setRangeQuestion] = useState<string | null>(null);
   const [selectedDay, setSelectedDay] = useState<string | null>(null);
   const [selectedArticle, setSelectedArticle] = useState<ArticleSelection | null>(null);
-
-  // Locked article state (click-to-lock)
   const [lockedArticle, setLockedArticle] = useState<ArticleSelection | null>(null);
-
-  // News category filter
-  const [activeCategory, setActiveCategory] = useState<string | null>(null);
-  const [activeCategoryIds, setActiveCategoryIds] = useState<string[]>([]);
-  const [activeCategoryColor, setActiveCategoryColor] = useState<string | null>(null);
-
-  // Chart area ref for popup positioning
+  const [activeView, setActiveView] = useState<'ticker' | 'analysis' | 'adanos' | 'social' | 'team' | 'automation' | 'overall'>('team');
+  const [overallEverActive, setOverallEverActive] = useState(false);
+  const [analysisEverActive, setAnalysisEverActive] = useState(false);
+  const [sentimentEverActive, setSentimentEverActive] = useState(false);
+  const [socialEverActive, setSocialEverActive] = useState(false);
+  const [teamEverActive, setTeamEverActive] = useState(true);
+  const [automationEverActive, setAutomationEverActive] = useState(false);
+  const [socialInitTicker, setSocialInitTicker] = useState<string | undefined>(undefined);
+  const [sourceFilter, setSourceFilter] = useState<'all' | 'news' | 'reddit'>('all');
+  const [sentimentFilter, setSentimentFilter] = useState<'all' | 'positive' | 'negative' | 'neutral'>('all');
   const chartAreaRef = useRef<HTMLDivElement>(null);
   const [chartRect, setChartRect] = useState<DOMRect | undefined>(undefined);
 
@@ -68,19 +77,45 @@ function App() {
       .catch(console.error);
   }, []);
 
-  // Update chartRect when range is selected (for popup positioning)
   useEffect(() => {
     if (selectedRange && chartAreaRef.current) {
       setChartRect(chartAreaRef.current.getBoundingClientRect());
     }
   }, [selectedRange]);
 
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const ticker = (e as CustomEvent<{ ticker: string }>).detail?.ticker;
+      if (ticker) setSocialInitTicker(ticker);
+      setActiveView('social');
+      setSocialEverActive(true);
+    };
+    window.addEventListener('navigate-social', handler);
+    return () => window.removeEventListener('navigate-social', handler);
+  }, []);
+
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const ticker = (e as CustomEvent<{ ticker: string }>).detail?.ticker;
+      if (ticker) handleSelectSymbol(ticker);
+      setActiveView('ticker');
+    };
+    window.addEventListener('navigate-ticker', handler);
+    return () => window.removeEventListener('navigate-ticker', handler);
+  }, []);
+
+  useEffect(() => {
+    const handler = () => {
+      setActiveView('adanos');
+      setSentimentEverActive(true);
+    };
+    window.addEventListener('navigate-adanos', handler);
+    return () => window.removeEventListener('navigate-adanos', handler);
+  }, []);
+
   const handleHover = useCallback(
     (date: string | null, ohlc?: { date: string; open: number; high: number; low: number; close: number; change: number }) => {
-      // Don't update hovered date when locked
-      if (!lockedArticle) {
-        setHoveredDate(date);
-      }
+      if (!lockedArticle) setHoveredDate(date);
       setHoveredOhlc(ohlc || null);
     },
     [lockedArticle]
@@ -98,19 +133,15 @@ function App() {
 
   const handleArticleSelect = useCallback((article: ArticleSelection | null) => {
     if (article === null) {
-      // Unlock
       setLockedArticle(null);
       setSelectedArticle(null);
       return;
     }
-    // Toggle: click same dot → unlock, different dot → lock new
     setLockedArticle((prev) => {
       if (prev && prev.newsId === article.newsId) {
-        // Unlock
         setSelectedArticle(null);
         return null;
       }
-      // Lock new
       setSelectedArticle(article);
       setSelectedRange(null);
       setRangeQuestion(null);
@@ -132,12 +163,6 @@ function App() {
     setRangeQuestion(question);
   }, []);
 
-  const handleCategoryChange = useCallback((category: string | null, articleIds: string[], color?: string) => {
-    setActiveCategory(category);
-    setActiveCategoryIds(articleIds);
-    setActiveCategoryColor(color ?? null);
-  }, []);
-
   function handleSelectSymbol(symbol: string) {
     setSelectedSymbol(symbol);
     setHoveredDate(null);
@@ -147,9 +172,8 @@ function App() {
     setSelectedDay(null);
     setSelectedArticle(null);
     setLockedArticle(null);
-    setActiveCategory(null);
-    setActiveCategoryIds([]);
-    setActiveCategoryColor(null);
+    setSourceFilter('all');
+    setSentimentFilter('all');
   }
 
   function handleAddTicker(symbol: string) {
@@ -159,11 +183,9 @@ function App() {
     }
   }
 
-  // Effective date for NewsPanel: locked takes priority
   const effectiveDate = lockedArticle?.date ?? hoveredDate;
   const isLocked = lockedArticle !== null;
 
-  // Right panel priority: rangeQuestion > rangeNews > selectedDay > default NewsPanel
   function renderRightPanel() {
     if (selectedRange && rangeQuestion) {
       return (
@@ -172,10 +194,7 @@ function App() {
           startDate={selectedRange.startDate}
           endDate={selectedRange.endDate}
           question={rangeQuestion}
-          onClear={() => {
-            setSelectedRange(null);
-            setRangeQuestion(null);
-          }}
+          onClear={() => { setSelectedRange(null); setRangeQuestion(null); }}
         />
       );
     }
@@ -201,115 +220,169 @@ function App() {
       );
     }
     return (
-      <>
-        <NewsPanel
-          symbol={selectedSymbol}
-          hoveredDate={effectiveDate}
-          onFindSimilar={(_newsId: string) => {
-            if (effectiveDate) handleDayClick(effectiveDate);
-          }}
-          highlightedNewsId={selectedArticle?.newsId || null}
-          isLocked={isLocked}
-          onUnlock={() => {
-            setLockedArticle(null);
-            setSelectedArticle(null);
-          }}
-          highlightedCategoryIds={activeCategoryIds.length > 0 ? activeCategoryIds : undefined}
-        />
-      </>
+      <NewsPanel
+        symbol={selectedSymbol}
+        hoveredDate={effectiveDate}
+        onFindSimilar={(_newsId: string) => { if (effectiveDate) handleDayClick(effectiveDate); }}
+        highlightedNewsId={selectedArticle?.newsId || null}
+        isLocked={isLocked}
+        onUnlock={() => { setLockedArticle(null); setSelectedArticle(null); }}
+        sourceFilter={sourceFilter}
+        onSourceFilterChange={setSourceFilter}
+        sentimentFilter={sentimentFilter}
+        onSentimentFilterChange={setSentimentFilter}
+      />
     );
   }
 
   return (
-    <div className="app">
-      <header className="app-header">
-        <div className="header-left">
-          <h1>PokieTicker</h1>
-        </div>
-        <StockSelector
-          activeTickers={activeTickers}
-          selectedSymbol={selectedSymbol}
-          onSelect={handleSelectSymbol}
-          onAdd={handleAddTicker}
-        />
-        {selectedRange ? (
-          <div className="header-ohlc">
-            <span className="ohlc-date">{selectedRange.startDate} ~ {selectedRange.endDate}</span>
-            <span className="range-badge">Range Selected</span>
-          </div>
-        ) : hoveredOhlc ? (
-          <div className="header-ohlc">
-            <span className="ohlc-date">{hoveredOhlc.date}</span>
-            <span className="ohlc-label">O</span>
-            <span className="ohlc-val">${hoveredOhlc.open.toFixed(2)}</span>
-            <span className="ohlc-label">H</span>
-            <span className="ohlc-val">${hoveredOhlc.high.toFixed(2)}</span>
-            <span className="ohlc-label">L</span>
-            <span className="ohlc-val">${hoveredOhlc.low.toFixed(2)}</span>
-            <span className="ohlc-label">C</span>
-            <span className="ohlc-val">${hoveredOhlc.close.toFixed(2)}</span>
-            <span className={`ohlc-change ${hoveredOhlc.change >= 0 ? 'up' : 'down'}`}>
-              {hoveredOhlc.change >= 0 ? '+' : ''}
-              {hoveredOhlc.change.toFixed(2)}%
-            </span>
-          </div>
-        ) : null}
-        <div className="header-right">
-          <a href="https://mitrui.com" target="_blank" rel="noopener noreferrer" className="header-link">
-            mitrui.com
-          </a>
-          <a href="https://github.com/owengetinfo-design/PokieTicker" target="_blank" rel="noopener noreferrer" className="header-link header-github">
-            <svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor">
-              <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/>
-            </svg>
-            <span className="github-text">GitHub</span>
-          </a>
-        </div>
-      </header>
+    <div className="app-wrapper">
+      <AppNav activeView={activeView} onChangeView={(view) => {
+        setActiveView(view);
+        if (view === 'overall') setOverallEverActive(true);
+        if (view === 'analysis') setAnalysisEverActive(true);
+        if (view === 'adanos') setSentimentEverActive(true);
+        if (view === 'social') setSocialEverActive(true);
+        if (view === 'team') setTeamEverActive(true);
+        if (view === 'automation') setAutomationEverActive(true);
+      }} />
 
-      <main className="app-main">
-        <div className="chart-area" ref={chartAreaRef}>
-          {selectedSymbol ? (
-            <>
-              <CandlestickChart
-                symbol={selectedSymbol}
-                lockedNewsId={lockedArticle?.newsId ?? null}
-                highlightedArticleIds={activeCategoryIds.length > 0 ? activeCategoryIds : null}
-                highlightColor={activeCategoryColor}
-                onHover={handleHover}
-                onRangeSelect={handleRangeSelect}
-                onArticleSelect={handleArticleSelect}
-                onDayClick={handleDayClick}
-              />
-              {selectedRange && !rangeQuestion && (
-                <RangeQueryPopup
-                  range={selectedRange}
-                  chartRect={chartRect}
-                  onAsk={handleRangeAsk}
-                  onClose={() => setSelectedRange(null)}
-                />
-              )}
-            </>
-          ) : (
-            <div className="chart-placeholder">Select a ticker to view the chart</div>
-          )}
-        </div>
-        {selectedSymbol && (
-          <div className="prediction-area">
-            <PredictionPanel symbol={selectedSymbol} />
-          </div>
-        )}
-        <div className="news-area">
+      {/* Detail view */}
+      <div className="app" style={{ display: activeView === 'ticker' ? 'flex' : 'none' }}>
+        <header className="app-header">
+          <div className="header-left"></div>
+          <StockSelector
+            activeTickers={activeTickers}
+            selectedSymbol={selectedSymbol}
+            onSelect={handleSelectSymbol}
+            onAdd={handleAddTicker}
+          />
+          {selectedRange ? (
+            <div className="header-ohlc">
+              <span className="ohlc-date">{selectedRange.startDate} ~ {selectedRange.endDate}</span>
+              <span className="range-badge">Range Selected</span>
+            </div>
+          ) : hoveredOhlc ? (
+            <div className="header-ohlc">
+              <span className="ohlc-date">{hoveredOhlc.date}</span>
+              <span className="ohlc-label">O</span><span className="ohlc-val">${hoveredOhlc.open.toFixed(2)}</span>
+              <span className="ohlc-label">H</span><span className="ohlc-val">${hoveredOhlc.high.toFixed(2)}</span>
+              <span className="ohlc-label">L</span><span className="ohlc-val">${hoveredOhlc.low.toFixed(2)}</span>
+              <span className="ohlc-label">C</span><span className="ohlc-val">${hoveredOhlc.close.toFixed(2)}</span>
+              <span className={`ohlc-change ${hoveredOhlc.change >= 0 ? 'up' : 'down'}`}>
+                {hoveredOhlc.change >= 0 ? '+' : ''}{hoveredOhlc.change.toFixed(2)}%
+              </span>
+            </div>
+          ) : null}
           {selectedSymbol && (
-            <NewsCategoryPanel
-              symbol={selectedSymbol}
-              activeCategory={activeCategory}
-              onCategoryChange={handleCategoryChange}
+            <DatePickerPopup
+              onSelectDayAnalysis={(date) => { if (date) handleDayClick(date); }}
+              onSelectDayNews={(date) => {
+                if (date) {
+                  setSelectedDay(null);
+                  setSelectedRange(null);
+                  setRangeQuestion(null);
+                  setHoveredDate(date);
+                  setLockedArticle({ newsId: '', date });
+                }
+              }}
+              onSelectRange={(start, end) => handleRangeSelect({ startDate: start, endDate: end })}
+              selectedDay={selectedDay}
+              selectedRange={selectedRange}
             />
           )}
-          {renderRightPanel()}
-        </div>
-      </main>
+          <div className="header-right"></div>
+        </header>
+
+        <main className="app-main">
+          <div className="chart-area" ref={chartAreaRef}>
+            {selectedSymbol ? (
+              <>
+                <CandlestickChart
+                  symbol={selectedSymbol}
+                  lockedNewsId={lockedArticle?.newsId ?? null}
+                  sourceFilter={sourceFilter}
+                  sentimentFilter={sentimentFilter}
+                  onHover={handleHover}
+                  onRangeSelect={handleRangeSelect}
+                  onArticleSelect={handleArticleSelect}
+                  onDayClick={handleDayClick}
+                />
+                {selectedRange && !rangeQuestion && selectedRange.popupX !== undefined && (
+                  <RangeQueryPopup
+                    range={selectedRange}
+                    chartRect={chartRect}
+                    onAsk={handleRangeAsk}
+                    onClose={() => setSelectedRange(null)}
+                  />
+                )}
+              </>
+            ) : (
+              <div className="chart-placeholder">Select a ticker to view the chart</div>
+            )}
+          </div>
+          {selectedSymbol && (
+            <div className="prediction-area">
+              <PredictionPanel
+                symbol={selectedSymbol}
+                refDate={selectedDay || undefined}
+              />
+            </div>
+          )}
+          <div className="news-area">{renderRightPanel()}</div>
+        </main>
+      </div>
+
+      {/* Overall view */}
+      <div style={{ display: activeView === 'overall' ? 'flex' : 'none', flex: 1, minWidth: 0, height: '100%', overflow: 'hidden' }}>
+        <Suspense fallback={<div style={{ color: '#888', padding: 40 }}>Loading Overall...</div>}>
+          {overallEverActive && <OverallApp />}
+        </Suspense>
+      </div>
+
+      {/* Analysis view — always mounted once visited, hidden via display:none to preserve state */}
+      <div style={{ display: activeView === 'analysis' ? 'flex' : 'none', flex: 1, minWidth: 0, height: '100%', overflow: 'hidden' }}>
+        <Suspense fallback={<div style={{ color: '#888', padding: 40 }}>Loading Analysis...</div>}>
+          {analysisEverActive && <AnalysisApp />}
+        </Suspense>
+      </div>
+
+      {/* Sentiment view */}
+      <div style={{ display: activeView === 'adanos' ? 'block' : 'none', flex: 1, overflow: 'auto' }}>
+        <Suspense fallback={<div style={{ color: '#888', padding: 40 }}>Loading Sentiment...</div>}>
+          {sentimentEverActive && <SentimentApp />}
+        </Suspense>
+      </div>
+
+      {/* Social view */}
+      <div style={{ display: activeView === 'social' ? 'flex' : 'none', flex: 1, minWidth: 0, height: '100%', overflow: 'hidden' }}>
+        <Suspense fallback={<div style={{ color: '#888', padding: 40 }}>Loading Social...</div>}>
+          {socialEverActive && <SocialApp initTicker={socialInitTicker} />}
+        </Suspense>
+      </div>
+
+      {/* Team view */}
+      <div style={{ display: activeView === 'team' ? 'flex' : 'none', flex: 1, minWidth: 0, height: '100%', overflow: 'auto' }}>
+        <Suspense fallback={<div style={{ color: '#888', padding: 40 }}>Loading Team...</div>}>
+          {teamEverActive && <TeamApp />}
+        </Suspense>
+      </div>
+
+      {/* Automation view */}
+      <div style={{ display: activeView === 'automation' ? 'flex' : 'none', flex: 1, minWidth: 0, height: '100%', overflow: 'auto' }}>
+        <Suspense fallback={<div style={{ color: '#888', padding: 40 }}>Loading Ops...</div>}>
+          {automationEverActive && <AutomationApp />}
+        </Suspense>
+      </div>
+
+      <a
+        className="global-signature"
+        href="https://ivyyy0601.github.io/"
+        target="_blank"
+        rel="noreferrer"
+      >
+        ivyyy0601
+      </a>
     </div>
   );
 }

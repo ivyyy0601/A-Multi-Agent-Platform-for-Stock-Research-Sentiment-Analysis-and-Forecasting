@@ -89,9 +89,29 @@ def collect_results(batch_id: str) -> dict:
                     continue
 
                 is_relevant = item.get("r") in ("y", "relevant")
-                relevance = "relevant" if is_relevant else "irrelevant"
                 raw_s = item.get("s", "0")
+                up_reason = (item.get("u") or "").strip()
+                down_reason = (item.get("d") or "").strip()
+                # If the model can articulate a directional stock impact,
+                # treat the article as relevant even if r came back inconsistent.
+                if not is_relevant and (up_reason or down_reason):
+                    is_relevant = True
+                relevance = "relevant" if is_relevant else "irrelevant"
                 sentiment = {"+": "positive", "-": "negative"}.get(raw_s, "neutral")
+                # Repair inconsistent outputs:
+                # if model says neutral but provides only one directional reason,
+                # treat it as directional instead of neutral.
+                if sentiment == "neutral":
+                    has_up = bool(up_reason)
+                    has_down = bool(down_reason)
+                    if has_up and not has_down:
+                        sentiment = "positive"
+                    elif has_down and not has_up:
+                        sentiment = "negative"
+                if not is_relevant:
+                    sentiment = "neutral"
+                    up_reason = ""
+                    down_reason = ""
 
                 conn.execute(
                     """INSERT OR REPLACE INTO layer1_results
@@ -104,8 +124,8 @@ def collect_results(batch_id: str) -> dict:
                         relevance,
                         item.get("e", ""),
                         sentiment,
-                        item.get("u", ""),
-                        item.get("d", ""),
+                        up_reason,
+                        down_reason,
                     ),
                 )
                 stats["processed"] += 1
@@ -130,18 +150,30 @@ def collect_results(batch_id: str) -> dict:
 
 def main():
     if len(sys.argv) < 2:
-        print("Usage: python -m backend.batch_collect <batch_id>")
-        # If no batch_id, show all batch jobs
+        # Auto-find the latest uncollected batch job
         conn = get_conn()
         jobs = conn.execute("SELECT * FROM batch_jobs ORDER BY created_at DESC").fetchall()
         conn.close()
-        if jobs:
-            print("\nExisting batch jobs:")
-            for j in jobs:
-                print(f"  {j['batch_id']}  status={j['status']}  total={j['total']}  created={j['created_at']}")
-        return
+        if not jobs:
+            print("No batch jobs found. Run batch_submit first.")
+            return
+        print("Existing batch jobs:")
+        for j in jobs:
+            print(f"  {j['batch_id']}  status={j['status']}  total={j['total']}  created={j['created_at']}")
 
-    batch_id = sys.argv[1]
+        # Pick latest uncollected
+        conn = get_conn()
+        job = conn.execute(
+            "SELECT batch_id FROM batch_jobs WHERE status NOT IN ('collected', 'expired') ORDER BY created_at DESC LIMIT 1"
+        ).fetchone()
+        conn.close()
+        if not job:
+            print("\nAll batch jobs already collected.")
+            return
+        batch_id = job["batch_id"]
+        print(f"\nAuto-selected latest pending batch: {batch_id}")
+    else:
+        batch_id = sys.argv[1]
 
     print(f"Checking batch: {batch_id}")
     status = check_status(batch_id)
@@ -153,11 +185,22 @@ def main():
     if status["status"] == "ended":
         print("\nBatch completed! Collecting results...")
         stats = collect_results(batch_id)
-        print(f"\n=== Results ===")
-        print(f"Processed: {stats['processed']}")
-        print(f"Relevant: {stats['relevant']}")
+        print(f"\n=== Layer 1 Results ===")
+        print(f"Processed:  {stats['processed']}")
+        print(f"Relevant:   {stats['relevant']}")
         print(f"Irrelevant: {stats['irrelevant']}")
-        print(f"Errors: {stats['errors']}")
+        print(f"Errors:     {stats['errors']}")
+
+        print("\n=== Running FinBERT on recent neutral articles ===")
+        try:
+            from backend.finbert_reclassify_recent import reclassify_recent
+            reclassify_recent(days=4)
+        except ModuleNotFoundError as e:
+            if e.name == "transformers":
+                print("Skipping FinBERT re-check: `transformers` is not installed in this .venv.")
+                print("Install it with: .venv/bin/pip install transformers torch")
+            else:
+                raise
     elif status["status"] == "in_progress":
         print("\nBatch still processing. Run this command again later.")
     else:

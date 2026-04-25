@@ -104,13 +104,14 @@ def get_news_particles(symbol: str):
     conn = get_conn()
     symbol = symbol.upper()
     rows = conn.execute(
-        """SELECT na.news_id, na.trade_date, na.ret_t1,
+        """SELECT na.news_id, na.trade_date, na.published_utc, na.ret_t1,
                   nr.title,
                   l1.sentiment, l1.relevance
            FROM news_aligned na
            JOIN news_raw nr ON na.news_id = nr.id
            LEFT JOIN layer1_results l1 ON na.news_id = l1.news_id AND l1.symbol = ?
            WHERE na.symbol = ?
+             AND lower(COALESCE(l1.relevance, '')) IN ('relevant', 'high', 'medium')
            ORDER BY na.trade_date ASC, l1.relevance DESC""",
         (symbol, symbol),
     ).fetchall()
@@ -118,7 +119,9 @@ def get_news_particles(symbol: str):
     return [
         {
             "id": r["news_id"],
-            "d": r["trade_date"],
+            "d": (r["published_utc"] or r["trade_date"])[:10],  # display on actual published date
+            "pd": (r["published_utc"] or r["trade_date"])[:10],
+            "td": r["trade_date"],  # trade_date for news lookup on click
             "s": r["sentiment"],
             "r": r["relevance"],
             "t": (r["title"] or "")[:80],
@@ -223,8 +226,9 @@ def get_news_timeline(symbol: str):
     symbol = symbol.upper()
 
     rows = conn.execute(
-        """SELECT trade_date, COUNT(*) as news_count,
-                  SUM(CASE WHEN l1.relevance = 'relevant' THEN 1 ELSE 0 END) as relevant_count
+        """SELECT trade_date,
+                  SUM(CASE WHEN lower(COALESCE(l1.relevance, '')) IN ('relevant', 'high', 'medium') THEN 1 ELSE 0 END) as news_count,
+                  SUM(CASE WHEN lower(COALESCE(l1.relevance, '')) IN ('relevant', 'high', 'medium') THEN 1 ELSE 0 END) as relevant_count
            FROM news_aligned na
            LEFT JOIN layer1_results l1 ON na.news_id = l1.news_id AND l1.symbol = na.symbol
            WHERE na.symbol = ?
@@ -233,4 +237,4 @@ def get_news_timeline(symbol: str):
         (symbol,),
     ).fetchall()
     conn.close()
-    return [dict(r) for r in rows]
+    return [dict(r) for r in rows if (r["news_count"] or 0) > 0]

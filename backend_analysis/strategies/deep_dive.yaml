@@ -1,0 +1,87 @@
+name: deep_dive
+display_name: Deep Dive Research
+description: Comprehensive single-stock research memo. Use when the user wants a full picture of a stock — business, sentiment, ML signal, historical behavior, and risks. This is the most thorough skill.
+category: framework
+core_rules: [1, 2, 3, 5, 7]
+required_tools:
+  - get_iv_news
+  - get_iv_forecast
+  - get_iv_similar_days
+  - get_iv_social
+  - get_iv_library
+  - get_iv_rag_search
+
+instructions: |
+  **Deep Dive Research Framework**
+
+  Use this skill when a full stock research memo is requested. This combines
+  all available data sources into one structured output.
+
+  ## Step 1 — Knowledge Base Check (avoid repeating past work)
+  - Call `get_iv_rag_search(query=symbol, symbol=symbol, collection="reports")` to find past research reports.
+  - Also call `get_iv_library(query=symbol, symbol=symbol)` to check for any stored memos.
+  - If a recent report exists (within 30 days), summarize what changed since then rather than starting from scratch.
+  - Use `get_iv_rag_search(query="<current news theme>", symbol=symbol, collection="news")` to find historical news events similar to the current narrative, including their actual return outcomes (ret_t1/ret_t3).
+
+  ## Step 2 — News & Sentiment Landscape
+  - Call `get_iv_news(symbol)` to get the recent news picture.
+  - Identify:
+    - Dominant narrative (what is the market talking about?)
+    - Sentiment balance: positive vs. negative article ratio
+    - Most impactful recent events (high `ret_t1` absolute value)
+    - Recurring themes across multiple articles
+
+  ## Step 3 — Social Sentiment
+  - Call `get_iv_social(symbol)` to check retail investor positioning.
+  - Note if retail is aligned with or fading institutional/news sentiment.
+
+  ## Step 4 — ML Signal Across Horizons
+  - Call `get_iv_forecast(symbol, horizon="1")` — next day
+  - Call `get_iv_forecast(symbol, horizon="7")` — next week
+  - Call `get_iv_forecast(symbol, horizon="14")` — next 2 weeks
+  - Note: are all three horizons aligned? Divergence across horizons is a flag.
+
+  ## Step 5 — Historical Context
+  - Call `get_iv_similar_days(symbol, top_k=5)`.
+  - Summarize: on similar past days, what was the typical outcome at t1, t3, t5?
+  - Is the current setup historically bullish or bearish?
+
+  ## Step 6 — Synthesis
+
+  Combine all signals into a structured memo:
+
+  ---
+  ## [SYMBOL] Deep Dive — [DATE]
+
+  ### Business Snapshot
+  (1-2 sentences on what the company does and why it matters now)
+
+  ### Current Narrative
+  (What is driving discussion? What does the market care about right now?)
+
+  ### Signal Summary
+  | Source | Signal | Confidence |
+  |--------|--------|------------|
+  | ML 1D  | Up/Down | 0.XX |
+  | ML 7D  | Up/Down | 0.XX |
+  | ML 14D | Up/Down | 0.XX |
+  | Social | Up/Down | 0.XX |
+  | News Sentiment | Positive/Negative/Mixed | — |
+
+  ### Historical Precedent
+  (What happened after similar setups in the past?)
+
+  ### Bull Case
+  (2-3 concrete reasons, not vague)
+
+  ### Bear Case
+  (2-3 concrete risks, not vague)
+
+  ### Key Catalysts to Watch
+  (Upcoming events that could change the thesis)
+
+  ### Conclusion
+  **Stance**: Bullish / Neutral / Bearish
+  **Conviction**: High / Medium / Low
+  **Rationale**: (1-2 sentences maximum)
+  ---
