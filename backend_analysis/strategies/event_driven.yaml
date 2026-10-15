@@ -7,7 +7,6 @@ required_tools:
   - get_iv_news
   - get_iv_forecast
   - get_iv_similar_days
-  - get_iv_social
 
 instructions: |
   **Event-Driven Analysis Framework**
@@ -33,7 +32,7 @@ instructions: |
   - Note any pattern: does the stock tend to fade the initial reaction?
 
   ## Step 4 — Sentiment Check
-  - Call `get_iv_social(symbol)` to see if retail sentiment aligns with or contradicts the event direction.
+  - Compare news sentiment with Reddit posts in `get_iv_news(symbol)` results to see if retail aligns with or contradicts the event direction.
   - Strong disagreement between news sentiment and social sentiment is worth flagging.
 
   ## Step 5 — ML Signal

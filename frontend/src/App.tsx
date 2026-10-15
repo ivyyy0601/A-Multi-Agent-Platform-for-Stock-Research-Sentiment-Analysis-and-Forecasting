@@ -14,10 +14,31 @@ import './App.css';
 
 const AnalysisApp = lazy(() => import('./views/analysis/AnalysisApp'));
 const SentimentApp = lazy(() => import('./views/sentiment/SentimentApp'));
-const SocialApp = lazy(() => import('./views/social/SocialApp'));
 const TeamApp = lazy(() => import('./views/team/TeamApp'));
 const AutomationApp = lazy(() => import('./views/automation/AutomationApp'));
 const OverallApp = lazy(() => import('./views/overall/OverallApp'));
+
+type View = 'ticker' | 'analysis' | 'adanos' | 'team' | 'automation' | 'overall';
+
+// Each view gets its own URL so a refresh (or a shared link) lands on the same page.
+const VIEW_PATHS: Record<View, string> = {
+  overall: '/overall',
+  analysis: '/analysis',
+  adanos: '/sentiment',
+  team: '/team',
+  ticker: '/detail',
+  automation: '/ops',
+};
+const DEFAULT_VIEW: View = 'overall';
+
+function viewFromPath(pathname: string): View {
+  const path = pathname.replace(/\/+$/, '') || '/';
+  const match = (Object.keys(VIEW_PATHS) as View[]).find((v) => VIEW_PATHS[v] === path);
+  return match ?? DEFAULT_VIEW;
+}
+
+const initialView = viewFromPath(window.location.pathname);
+const initialSymbol = new URLSearchParams(window.location.search).get('symbol')?.toUpperCase() ?? '';
 
 interface RangeSelection {
   startDate: string;
@@ -34,7 +55,7 @@ interface ArticleSelection {
 
 function App() {
   const [activeTickers, setActiveTickers] = useState<string[]>([]);
-  const [selectedSymbol, setSelectedSymbol] = useState('');
+  const [selectedSymbol, setSelectedSymbol] = useState(initialSymbol);
   const [hoveredDate, setHoveredDate] = useState<string | null>(null);
   const [hoveredOhlc, setHoveredOhlc] = useState<{
     date: string;
@@ -49,14 +70,12 @@ function App() {
   const [selectedDay, setSelectedDay] = useState<string | null>(null);
   const [selectedArticle, setSelectedArticle] = useState<ArticleSelection | null>(null);
   const [lockedArticle, setLockedArticle] = useState<ArticleSelection | null>(null);
-  const [activeView, setActiveView] = useState<'ticker' | 'analysis' | 'adanos' | 'social' | 'team' | 'automation' | 'overall'>('team');
-  const [overallEverActive, setOverallEverActive] = useState(false);
-  const [analysisEverActive, setAnalysisEverActive] = useState(false);
-  const [sentimentEverActive, setSentimentEverActive] = useState(false);
-  const [socialEverActive, setSocialEverActive] = useState(false);
-  const [teamEverActive, setTeamEverActive] = useState(true);
-  const [automationEverActive, setAutomationEverActive] = useState(false);
-  const [socialInitTicker, setSocialInitTicker] = useState<string | undefined>(undefined);
+  const [activeView, setActiveView] = useState<View>(initialView);
+  const [overallEverActive, setOverallEverActive] = useState(initialView === 'overall');
+  const [analysisEverActive, setAnalysisEverActive] = useState(initialView === 'analysis');
+  const [sentimentEverActive, setSentimentEverActive] = useState(initialView === 'adanos');
+  const [teamEverActive, setTeamEverActive] = useState(initialView === 'team');
+  const [automationEverActive, setAutomationEverActive] = useState(initialView === 'automation');
   const [sourceFilter, setSourceFilter] = useState<'all' | 'news' | 'reddit'>('all');
   const [sentimentFilter, setSentimentFilter] = useState<'all' | 'positive' | 'negative' | 'neutral'>('all');
   const chartAreaRef = useRef<HTMLDivElement>(null);
@@ -77,22 +96,46 @@ function App() {
       .catch(console.error);
   }, []);
 
+  // Mark a view as mounted the first time it is shown, however we got there
+  // (nav click, custom navigate-* event, or browser back/forward).
+  useEffect(() => {
+    if (activeView === 'overall') setOverallEverActive(true);
+    if (activeView === 'analysis') setAnalysisEverActive(true);
+    if (activeView === 'adanos') setSentimentEverActive(true);
+    if (activeView === 'team') setTeamEverActive(true);
+    if (activeView === 'automation') setAutomationEverActive(true);
+  }, [activeView]);
+
+  // Keep the URL in sync with the active view (and the ticker on the Detail page).
+  useEffect(() => {
+    const path = VIEW_PATHS[activeView];
+    const search = activeView === 'ticker' && selectedSymbol ? `?symbol=${encodeURIComponent(selectedSymbol)}` : '';
+    const target = path + search;
+    if (window.location.pathname + window.location.search === target) return;
+    // Same view (only ?symbol changed) or an unknown path like "/": replace, so Back doesn't bounce.
+    const onKnownPath = (Object.values(VIEW_PATHS) as string[]).includes(window.location.pathname);
+    if (window.location.pathname === path || !onKnownPath) {
+      window.history.replaceState(null, '', target);
+    } else {
+      window.history.pushState(null, '', target);
+    }
+  }, [activeView, selectedSymbol]);
+
+  useEffect(() => {
+    const handler = () => {
+      setActiveView(viewFromPath(window.location.pathname));
+      const symbol = new URLSearchParams(window.location.search).get('symbol');
+      if (symbol) setSelectedSymbol(symbol.toUpperCase());
+    };
+    window.addEventListener('popstate', handler);
+    return () => window.removeEventListener('popstate', handler);
+  }, []);
+
   useEffect(() => {
     if (selectedRange && chartAreaRef.current) {
       setChartRect(chartAreaRef.current.getBoundingClientRect());
     }
   }, [selectedRange]);
-
-  useEffect(() => {
-    const handler = (e: Event) => {
-      const ticker = (e as CustomEvent<{ ticker: string }>).detail?.ticker;
-      if (ticker) setSocialInitTicker(ticker);
-      setActiveView('social');
-      setSocialEverActive(true);
-    };
-    window.addEventListener('navigate-social', handler);
-    return () => window.removeEventListener('navigate-social', handler);
-  }, []);
 
   useEffect(() => {
     const handler = (e: Event) => {
@@ -237,15 +280,7 @@ function App() {
 
   return (
     <div className="app-wrapper">
-      <AppNav activeView={activeView} onChangeView={(view) => {
-        setActiveView(view);
-        if (view === 'overall') setOverallEverActive(true);
-        if (view === 'analysis') setAnalysisEverActive(true);
-        if (view === 'adanos') setSentimentEverActive(true);
-        if (view === 'social') setSocialEverActive(true);
-        if (view === 'team') setTeamEverActive(true);
-        if (view === 'automation') setAutomationEverActive(true);
-      }} />
+      <AppNav activeView={activeView} onChangeView={setActiveView} />
 
       {/* Detail view */}
       <div className="app" style={{ display: activeView === 'ticker' ? 'flex' : 'none' }}>
@@ -351,13 +386,6 @@ function App() {
       <div style={{ display: activeView === 'adanos' ? 'block' : 'none', flex: 1, overflow: 'auto' }}>
         <Suspense fallback={<div style={{ color: '#888', padding: 40 }}>Loading Sentiment...</div>}>
           {sentimentEverActive && <SentimentApp />}
-        </Suspense>
-      </div>
-
-      {/* Social view */}
-      <div style={{ display: activeView === 'social' ? 'flex' : 'none', flex: 1, minWidth: 0, height: '100%', overflow: 'hidden' }}>
-        <Suspense fallback={<div style={{ color: '#888', padding: 40 }}>Loading Social...</div>}>
-          {socialEverActive && <SocialApp initTicker={socialInitTicker} />}
         </Suspense>
       </div>
 

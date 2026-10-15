@@ -35,7 +35,6 @@ TOOL_DISPLAY_NAMES: Dict[str, str] = {
     "get_iv_forecast":            "读取ML预测信号",
     "get_iv_news":                "获取新闻与情绪",
     "get_iv_similar_days":        "查找历史相似日",
-    "get_iv_social":              "分析社交舆情",
     "get_iv_library":             "检索研究报告库",
     "get_iv_rag_search":          "语义搜索知识库",
 }

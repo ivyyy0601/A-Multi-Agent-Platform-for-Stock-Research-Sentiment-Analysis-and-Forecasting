@@ -445,6 +445,7 @@ class StockAnalysisPipeline:
         # User requirement: do not proceed with empty US fundamentals.
         # Keep collecting into storage until a complete snapshot generated during
         # this request exists, then analyze from that stored snapshot only.
+        max_attempts = 20
         while True:
             attempt += 1
             budget = budgets[min(attempt - 1, len(budgets) - 1)]
@@ -516,6 +517,14 @@ class StockAnalysisPipeline:
                 (latest_snapshot or last_context or {}).get("coverage", {}),
                 (latest_snapshot or last_context or {}).get("errors", []),
             )
+            if attempt >= max_attempts:
+                logger.warning(
+                    "%s(%s) 美股基本面重试达到上限 %d 次，使用现有快照继续分析",
+                    stock_name,
+                    code,
+                    max_attempts,
+                )
+                return (latest_snapshot or last_context or {})  # type: ignore[return-value]
             time.sleep(min(5.0, 1.5 + attempt * 0.5))
 
     @staticmethod

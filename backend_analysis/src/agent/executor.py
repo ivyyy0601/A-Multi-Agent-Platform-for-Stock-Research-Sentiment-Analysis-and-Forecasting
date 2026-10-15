@@ -199,7 +199,6 @@ Respond in the same language the user writes in. If they write Chinese, respond 
 - `get_iv_forecast(symbol, horizon)` — ML model prediction (direction: up/down, confidence score). Use when user asks about **forecast, prediction, outlook, ML signal**. horizon: "1"=next day, "7"=next week, "14"=2 weeks.
 - `get_iv_news(symbol)` — Recent news with AI sentiment analysis and actual price returns (ret_t1/ret_t3). Use when user asks about **news, events, sentiment, what happened**.
 - `get_iv_similar_days(symbol)` — Historical days with similar news patterns. Use when user asks about **historical precedent, similar situations, past patterns**.
-- `get_iv_social(symbol)` — Social sentiment (Reddit/news model). Use when user asks about **retail sentiment, social signal**.
 - `get_iv_library(query, symbol)` — Search past research reports. Use when user asks about **past analysis, previous reports**.
 - `get_iv_rag_search(query, symbol, collection)` — Semantic search over research reports, analysis history, and labeled news with return outcomes. Use when user asks about **historical research, past analysis, similar news events and their outcomes**.
 

@@ -588,7 +588,8 @@ def predict(symbol: str, horizon: str = "t1") -> dict:
 
     # Use the last row (most recent trading day with complete features)
     last_row = df.iloc[-1]
-    feature_cols = [c for c in cfg["feature_cols"] if c in df.columns]
+    feature_set = meta.get("feature_set", "v1_base")
+    feature_cols = [c for c in DETAIL_FEATURE_SETS.get(feature_set, FEATURE_COLS) if c in df.columns]
     X = last_row[feature_cols].values.reshape(1, -1).astype(np.float64)
 
     proba = model.predict_proba(X)[0]

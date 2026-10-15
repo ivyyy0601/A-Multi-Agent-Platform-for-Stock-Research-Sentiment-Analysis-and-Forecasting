@@ -310,6 +310,7 @@
   word-break: break-word;
   margin: 0;
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, Liberation Mono, monospace;
+  font-size: 13px;
   color: rgba(245, 247, 251, 0.82);
   max-height: 320px;
   overflow: auto;

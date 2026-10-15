@@ -1,12 +1,14 @@
 import time
 import json
 from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 from typing import Any, Dict, List, Optional
 import requests
 
 from backend.config import settings
 
 BASE = "https://api.polygon.io"
+EASTERN = ZoneInfo("America/New_York")
 
 
 def _headers() -> Dict[str, str]:
@@ -72,6 +74,45 @@ def fetch_ohlc(ticker: str, start: str, end: str) -> List[Dict[str, Any]]:
             }
         )
     return rows
+
+
+def fetch_intraday_ohlc_from_minutes(ticker: str, date: str) -> Optional[Dict[str, Any]]:
+    """Build a provisional daily OHLC row from 1-minute aggregates for a single date."""
+    url = f"{BASE}/v2/aggs/ticker/{ticker}/range/1/minute/{date}/{date}"
+    params = {"adjusted": "true", "sort": "asc", "limit": 50000}
+    resp = http_get(url, params=params)
+    results = resp.json().get("results") or []
+    if not results:
+        return None
+
+    first = results[0]
+    last = results[-1]
+    total_volume = sum(float(r.get("v") or 0) for r in results)
+    weighted_vwap_num = sum(float(r.get("vw") or 0) * float(r.get("v") or 0) for r in results if r.get("vw") is not None)
+    total_transactions = sum(int(r.get("n") or 0) for r in results)
+
+    return {
+        "date": date,
+        "open": first.get("o"),
+        "high": max(float(r.get("h") or 0) for r in results),
+        "low": min(float(r.get("l") or 0) for r in results),
+        "close": last.get("c"),
+        "volume": total_volume,
+        "vwap": (weighted_vwap_num / total_volume) if total_volume > 0 else last.get("vw"),
+        "transactions": total_transactions,
+    }
+
+
+def should_try_provisional_daily_bar(date_str: str) -> bool:
+    """Return True when it's reasonable to expect today's bar from intraday minute data."""
+    target = datetime.fromisoformat(date_str).date()
+    now_et = datetime.now(EASTERN)
+    if target != now_et.date():
+        return False
+    if now_et.weekday() >= 5:
+        return False
+    # Wait a bit past the close so late minute bars have time to settle.
+    return (now_et.hour, now_et.minute) >= (16, 15)
 
 
 def fetch_news(

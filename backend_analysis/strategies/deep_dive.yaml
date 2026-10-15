@@ -7,7 +7,6 @@ required_tools:
   - get_iv_news
   - get_iv_forecast
   - get_iv_similar_days
-  - get_iv_social
   - get_iv_library
   - get_iv_rag_search
 
@@ -31,8 +30,8 @@ instructions: |
     - Most impactful recent events (high `ret_t1` absolute value)
     - Recurring themes across multiple articles
 
-  ## Step 3 — Social Sentiment
-  - Call `get_iv_social(symbol)` to check retail investor positioning.
+  ## Step 3 — Sentiment
+  - Use the sentiment in `get_iv_news(symbol)` results (including Reddit posts) to gauge retail positioning.
   - Note if retail is aligned with or fading institutional/news sentiment.
 
   ## Step 4 — ML Signal Across Horizons

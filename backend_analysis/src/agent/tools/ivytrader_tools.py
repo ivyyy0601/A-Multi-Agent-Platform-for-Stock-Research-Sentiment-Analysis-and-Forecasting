@@ -7,7 +7,6 @@ Tools:
 - get_iv_news:          Recent relevant news with sentiment + actual returns
 - get_iv_similar_days:  Historical similar market days for a symbol
 - get_iv_library:       Search historical research reports
-- get_iv_social:        Social sentiment signal (Reddit/Twitter) via adanos
 """
 
 import logging
@@ -328,48 +327,6 @@ get_iv_library_tool = ToolDefinition(
 )
 
 
-# ── Tool 5: Social Sentiment (Adanos) ────────────────────────────────────────
-
-def _handle_get_iv_social(symbol: str) -> dict:
-    """Get social media sentiment signal for a US stock."""
-    try:
-        data = _get(f"/api/adanos/forecast/{symbol.upper()}")
-        if not data:
-            return {"error": f"No social signal for {symbol}"}
-
-        return {
-            "symbol": symbol.upper(),
-            "direction": data.get("direction"),       # "up" | "down"
-            "confidence": data.get("confidence"),
-            "reddit_sentiment": data.get("reddit_sentiment"),
-            "news_sentiment": data.get("news_sentiment"),
-            "forecast_date": data.get("forecast_date"),
-            "note": "Based on Reddit/news sentiment model (Adanos).",
-        }
-    except Exception as e:
-        return {"error": f"Social signal fetch failed: {e}"}
-
-
-get_iv_social_tool = ToolDefinition(
-    name="get_iv_social",
-    description=(
-        "Get IvyTrader's social sentiment signal for a US stock. "
-        "Based on Reddit and news sentiment analysis (Adanos model). "
-        "Use this to understand retail investor sentiment alongside ML forecast."
-    ),
-    parameters=[
-        ToolParameter(
-            name="symbol",
-            type="string",
-            description="US stock ticker symbol (e.g. AAPL, NVDA, TSLA)",
-            required=True,
-        ),
-    ],
-    handler=_handle_get_iv_social,
-    category="data",
-)
-
-
 # ── Export all tools ──────────────────────────────────────────────────────────
 
 IVYTRADER_TOOLS = [
@@ -377,5 +334,4 @@ IVYTRADER_TOOLS = [
     get_iv_news_tool,
     get_iv_similar_days_tool,
     get_iv_library_tool,
-    get_iv_social_tool,
 ]

@@ -52,3 +52,27 @@ logs/
 
 # OS
 Thumbs.db
+
+# Server-local files (not source code)
+.venv311/
+*.db.bak
+*.tgz
+models/
+results/
+reddit_data/
+*.jsonl
+/AlgoTrading.json
+/Daytrading.json
+/EconMonitor.json
+/Finance.json
+/InvestmentClub.json
+/Quant.json
+/RealDayTrading.json
+/StockMarket.json
+/Trading.json
+/ValueInvesting.json
+/WallStreet.json
+/investing.json
+/options.json
+/stocks.json
+/swingtrading.json
