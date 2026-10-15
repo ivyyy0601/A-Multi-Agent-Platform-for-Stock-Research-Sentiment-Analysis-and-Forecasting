@@ -184,7 +184,7 @@ function buildDataSources(tab: string, symbol: string): DataSource[] {
           const buy  = parseInt(c.strong_buy ?? 0) + parseInt(c.buy ?? 0);
           const hold = parseInt(c.hold ?? 0);
           const sell = parseInt(c.sell ?? 0) + parseInt(c.strong_sell ?? 0);
-          return `[Analyst] Rating=${c.recommendation}, Target=$${parseFloat(c.price_target_mean ?? c.price_target)?.toFixed(2)}, Range=$${parseFloat(c.price_target_low)?.toFixed(2)}–$${parseFloat(c.price_target_high)?.toFixed(2)}, Buy=${buy}, Hold=${hold}, Sell=${sell}`;
+          return `[Analyst] Rating=${c.recommendation}, Target=$${parseFloat(c.price_target_mean ?? c.target_mean_price ?? c.price_target)?.toFixed(2)}, Range=$${parseFloat(c.price_target_low ?? c.target_low_price)?.toFixed(2)}–$${parseFloat(c.price_target_high ?? c.target_high_price)?.toFixed(2)}, Buy=${buy}, Hold=${hold}, Sell=${sell}`;
         },
       },
       {

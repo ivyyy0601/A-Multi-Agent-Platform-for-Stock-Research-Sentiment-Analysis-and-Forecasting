@@ -65,6 +65,26 @@ interface SimilarStats {
   weighted_avg_ret: number | null;
 }
 
+interface SimilarDaySnapshot {
+  date: string;
+  similarity: number;
+  sentiment_score: number;
+  n_relevant: number;
+  ret_after_horizon: number | null;
+  ret_t1_after: number | null;
+}
+
+interface SimilarDaysApiData {
+  similar_days: SimilarDaySnapshot[];
+  stats: {
+    count: number;
+    up_ratio_t1: number | null;
+    avg_ret_t1: number | null;
+    weighted_up_ratio_t1: number | null;
+    weighted_avg_ret_t1: number | null;
+  };
+}
+
 interface DeepAnalysis {
   news_id: string;
   discussion: string;
@@ -261,6 +281,7 @@ export default function PredictionPanel({ symbol, refDate }: Props) {
   const [forecast1, setForecast1] = useState<Forecast | null>(null);
   const [forecast7, setForecast7] = useState<Forecast | null>(null);
   const [forecast14, setForecast14] = useState<Forecast | null>(null);
+  const [similar1D, setSimilar1D] = useState<SimilarDaysApiData | null>(null);
   const [forecastCache, setForecastCache] = useState<Record<string, {
     f1: Forecast | null;
     f7: Forecast | null;
@@ -316,6 +337,17 @@ export default function PredictionPanel({ symbol, refDate }: Props) {
         }
       })
       .finally(() => setLoading(false));
+  }, [symbol, refDate]);
+
+  useEffect(() => {
+    if (!symbol || !refDate) {
+      setSimilar1D(null);
+      return;
+    }
+    axios
+      .get(`/api/predict/${symbol}/similar-days?date=${refDate}`)
+      .then((res) => setSimilar1D(res.data as SimilarDaysApiData))
+      .catch(() => setSimilar1D(null));
   }, [symbol, refDate]);
 
   const keywords = useMemo(() => {
@@ -424,6 +456,7 @@ export default function PredictionPanel({ symbol, refDate }: Props) {
               key={activeForecast.window_days}
               label={`${activeForecast.window_days}D`}
               forecast={activeForecast}
+              exactSimilar1D={activeForecast.window_days === 1 ? similar1D : null}
               symbol={symbol}
               deepLoading={deepLoading}
               deepResults={deepResults}
@@ -442,6 +475,7 @@ export default function PredictionPanel({ symbol, refDate }: Props) {
 function ForecastSection({
   label,
   forecast,
+  exactSimilar1D,
   symbol,
   deepLoading,
   deepResults,
@@ -452,6 +486,7 @@ function ForecastSection({
 }: {
   label: string;
   forecast: Forecast;
+  exactSimilar1D: SimilarDaysApiData | null;
   symbol: string;
   deepLoading: string | null;
   deepResults: Record<string, DeepAnalysis>;
@@ -463,7 +498,26 @@ function ForecastSection({
   const horizonKey = forecast.horizon_key;
   const primary = forecast.prediction[horizonKey];
   const ns = forecast.news_summary;
-  const stats = forecast.similar_stats;
+  const stats = exactSimilar1D
+    ? {
+        count: exactSimilar1D.stats.count,
+        horizon_days: 1,
+        up_ratio: exactSimilar1D.stats.up_ratio_t1,
+        avg_ret: exactSimilar1D.stats.avg_ret_t1,
+        weighted_up_ratio: exactSimilar1D.stats.weighted_up_ratio_t1,
+        weighted_avg_ret: exactSimilar1D.stats.weighted_avg_ret_t1,
+      }
+    : forecast.similar_stats;
+  const similarPeriods = exactSimilar1D
+    ? exactSimilar1D.similar_days.map((day) => ({
+        period_start: day.date,
+        period_end: day.date,
+        similarity: day.similarity,
+        avg_sentiment: day.sentiment_score,
+        n_relevant: day.n_relevant,
+        ret_after_horizon: day.ret_t1_after ?? day.ret_after_horizon,
+      }))
+    : forecast.similar_periods;
   const combined = buildCombinedSignal(primary, stats);
   const combinedUp = combined?.direction === 'up';
 
@@ -554,7 +608,7 @@ function ForecastSection({
           </div>
 
           <div className="fc-periods-list">
-            {forecast.similar_periods.slice(0, 5).map((p, i) => (
+            {similarPeriods.slice(0, 5).map((p, i) => (
               <div key={i} className="fc-period-card">
                 <div className="fc-period-header">
                   <span className="fc-period-dates">{p.period_start}</span>

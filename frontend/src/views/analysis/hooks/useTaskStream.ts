@@ -12,6 +12,7 @@ export type SSEEventType =
   | 'task_updated'
   | 'task_completed'
   | 'task_failed'
+  | 'task_cancelled'
   | 'heartbeat';
 
 /**
@@ -37,6 +38,8 @@ export interface UseTaskStreamOptions {
   onTaskCompleted?: (task: TaskInfo) => void;
   /** 任务失败回调 */
   onTaskFailed?: (task: TaskInfo) => void;
+  /** 任务取消回调 */
+  onTaskCancelled?: (task: TaskInfo) => void;
   /** 连接成功回调 */
   onConnected?: () => void;
   /** 连接错误回调 */
@@ -85,6 +88,7 @@ export function useTaskStream(options: UseTaskStreamOptions = {}): UseTaskStream
     onTaskUpdated,
     onTaskCompleted,
     onTaskFailed,
+    onTaskCancelled,
     onConnected,
     onError,
     autoReconnect = true,
@@ -104,6 +108,7 @@ export function useTaskStream(options: UseTaskStreamOptions = {}): UseTaskStream
     onTaskUpdated,
     onTaskCompleted,
     onTaskFailed,
+    onTaskCancelled,
     onConnected,
     onError,
   });
@@ -116,6 +121,7 @@ export function useTaskStream(options: UseTaskStreamOptions = {}): UseTaskStream
       onTaskUpdated,
       onTaskCompleted,
       onTaskFailed,
+      onTaskCancelled,
       onConnected,
       onError,
     };
@@ -192,6 +198,11 @@ export function useTaskStream(options: UseTaskStreamOptions = {}): UseTaskStream
     eventSource.addEventListener('task_failed', (e) => {
       const task = parseEventData(e.data);
       if (task) callbacksRef.current.onTaskFailed?.(task);
+    });
+
+    eventSource.addEventListener('task_cancelled', (e) => {
+      const task = parseEventData(e.data);
+      if (task) callbacksRef.current.onTaskCancelled?.(task);
     });
 
     // 心跳 - 仅用于保持连接

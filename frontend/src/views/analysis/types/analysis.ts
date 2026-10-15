@@ -79,14 +79,14 @@ export interface AnalysisResult {
 /** 异步任务接受响应 */
 export interface TaskAccepted {
   taskId: string;
-  status: 'pending' | 'processing' | 'waiting_for_fundamentals';
+  status: 'pending' | 'processing' | 'waiting_for_fundamentals' | 'cancelled';
   message?: string;
 }
 
 export interface BatchTaskAcceptedItem {
   taskId: string;
   stockCode: string;
-  status: 'pending' | 'processing' | 'waiting_for_fundamentals';
+  status: 'pending' | 'processing' | 'waiting_for_fundamentals' | 'cancelled';
   message?: string;
 }
 
@@ -109,7 +109,7 @@ export type AnalyzeResponse = AnalysisResult | AnalyzeAsyncResponse;
 /** 任务状态 */
 export interface TaskStatus {
   taskId: string;
-  status: 'pending' | 'processing' | 'waiting_for_fundamentals' | 'completed' | 'failed';
+  status: 'pending' | 'processing' | 'waiting_for_fundamentals' | 'completed' | 'failed' | 'cancelled';
   progress?: number;
   result?: AnalysisResult;
   error?: string;
@@ -120,7 +120,7 @@ export interface TaskInfo {
   taskId: string;
   stockCode: string;
   stockName?: string;
-  status: 'pending' | 'processing' | 'waiting_for_fundamentals' | 'completed' | 'failed';
+  status: 'pending' | 'processing' | 'waiting_for_fundamentals' | 'completed' | 'failed' | 'cancelled';
   progress: number;
   message?: string;
   reportType: string;

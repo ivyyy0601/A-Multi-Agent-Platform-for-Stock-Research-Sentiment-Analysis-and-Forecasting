@@ -53,6 +53,7 @@ const HomePage: React.FC = () => {
 
   // Task queue state
   const [activeTasks, setActiveTasks] = useState<TaskInfo[]>([]);
+  const [cancellingTaskIds, setCancellingTaskIds] = useState<string[]>([]);
   const [duplicateError, setDuplicateError] = useState<string | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
@@ -130,6 +131,18 @@ const HomePage: React.FC = () => {
     setActiveTasks((prev) => prev.filter((t) => t.taskId !== taskId));
   }, []);
 
+  const handleCancelTask = useCallback(async (taskId: string) => {
+    setCancellingTaskIds((prev) => prev.includes(taskId) ? prev : [...prev, taskId]);
+    try {
+      await analysisApi.cancelTask(taskId);
+      removeTask(taskId);
+    } catch (err) {
+      setStoreError(getParsedApiError(err));
+    } finally {
+      setCancellingTaskIds((prev) => prev.filter((id) => id !== taskId));
+    }
+  }, [removeTask, setStoreError]);
+
   // SSE Task Stream
   useTaskStream({
     onTaskCreated: (task) => {
@@ -153,6 +166,9 @@ const HomePage: React.FC = () => {
       setStoreError(getParsedApiError(task.error || 'Analysis failed'));
       // Delay removal of task
       setTimeout(() => removeTask(task.taskId), 5000);
+    },
+    onTaskCancelled: (task) => {
+      removeTask(task.taskId);
     },
     onError: () => {
       console.warn('SSE connection disconnected, reconnecting...');
@@ -440,7 +456,7 @@ const HomePage: React.FC = () => {
 
   const sidebarContent = (
     <div className="flex flex-col gap-3 overflow-hidden min-h-0 h-full">
-      <TaskPanel tasks={activeTasks} />
+      <TaskPanel tasks={activeTasks} onCancelTask={handleCancelTask} cancellingTaskIds={cancellingTaskIds} />
       <HistoryList
         items={historyItems}
         isLoading={isLoadingHistory}

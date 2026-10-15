@@ -39,8 +39,10 @@ const PIPELINES = [
       'submit_batch',
       'wait_batch',
       'collect_batch',
+      'finbert',
       'train_detail',
       'cache_detail_forecast',
+      'update_rag',
     ],
     stepLabels: {
       start: 'Start',
@@ -49,8 +51,10 @@ const PIPELINES = [
       submit_batch: 'Submit Batch',
       wait_batch: 'Wait Batch',
       collect_batch: 'Collect Batch',
+      finbert: 'Run FinBERT',
       train_detail: 'Train Detail',
       cache_detail_forecast: 'Cache Detail Forecasts',
+      update_rag: 'Update RAG',
     } as Record<string, string>,
   },
 ];

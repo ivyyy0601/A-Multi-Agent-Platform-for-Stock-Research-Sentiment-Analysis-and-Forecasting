@@ -356,7 +356,10 @@ function App() {
           </div>
           {selectedSymbol && (
             <div className="prediction-area">
-              <PredictionPanel symbol={selectedSymbol} />
+              <PredictionPanel
+                symbol={selectedSymbol}
+                refDate={selectedDay || undefined}
+              />
             </div>
           )}
           <div className="news-area">{renderRightPanel()}</div>

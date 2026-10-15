@@ -250,10 +250,10 @@ export default function StockView({ symbol: initSymbol, onSelectStock, watchlist
   // ── Analyst tab ───────────────────────────────────────────────────
   function AnalystTab() {
     if (tabLoading) return <div className="overall-loading" style={{ height: 80 }}>Loading...</div>;
-    const targetMean = parseFloat(consensus?.target_consensus ?? 0);
-    const targetHigh = parseFloat(consensus?.target_high ?? 0);
-    const targetLow  = parseFloat(consensus?.target_low  ?? 0);
-    const numAnalysts = parseInt(consensus?.number_of_analysts ?? 0);
+    const targetMean = parseFloat(consensus?.target_consensus ?? consensus?.target_mean_price ?? consensus?.price_target_mean ?? consensus?.price_target ?? 0);
+    const targetHigh = parseFloat(consensus?.target_high ?? consensus?.target_high_price ?? consensus?.price_target_high ?? 0);
+    const targetLow  = parseFloat(consensus?.target_low ?? consensus?.target_low_price ?? consensus?.price_target_low ?? 0);
+    const numAnalysts = parseInt(consensus?.number_of_analysts ?? consensus?.analyst_count ?? 0);
     const rec = consensus?.recommendation ?? '';
     const recMean = parseFloat(consensus?.recommendation_mean ?? 0);
     // recommendation_mean: 1=strong buy, 2=buy, 3=hold, 4=sell, 5=strong sell
@@ -311,7 +311,7 @@ export default function StockView({ symbol: initSymbol, onSelectStock, watchlist
               </div>
               <div style={{ textAlign: 'center' }}>
                 <div style={{ fontSize: 11, color: '#666', marginBottom: 4 }}>Median Target</div>
-                <div style={{ fontSize: 18, fontWeight: 700, color: '#6c8fff' }}>{price(consensus.target_median)}</div>
+                <div style={{ fontSize: 18, fontWeight: 700, color: '#6c8fff' }}>{price(consensus.target_median ?? consensus.target_median_price ?? consensus.target_mean_price)}</div>
               </div>
             </div>
           </div>

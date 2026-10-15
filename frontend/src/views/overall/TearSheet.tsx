@@ -85,8 +85,8 @@ function buildContext(
   if (sources.includes('analyst') && consensus) {
     lines.push('\n--- Analyst Consensus ---');
     lines.push(`Rating: ${consensus.recommendation ?? 'N/A'}`);
-    lines.push(`Price Target (Mean): $${parseFloat(consensus.price_target_mean ?? consensus.price_target)?.toFixed(2) ?? 'N/A'}`);
-    lines.push(`Range: $${parseFloat(consensus.price_target_low)?.toFixed(2) ?? 'N/A'} - $${parseFloat(consensus.price_target_high)?.toFixed(2) ?? 'N/A'}`);
+    lines.push(`Price Target (Mean): $${parseFloat(consensus.price_target_mean ?? consensus.target_mean_price ?? consensus.price_target)?.toFixed(2) ?? 'N/A'}`);
+    lines.push(`Range: $${parseFloat(consensus.price_target_low ?? consensus.target_low_price)?.toFixed(2) ?? 'N/A'} - $${parseFloat(consensus.price_target_high ?? consensus.target_high_price)?.toFixed(2) ?? 'N/A'}`);
     const buy  = (parseInt(consensus.strong_buy ?? 0) + parseInt(consensus.buy ?? 0));
     const hold = parseInt(consensus.hold ?? 0);
     const sell = (parseInt(consensus.sell ?? 0) + parseInt(consensus.strong_sell ?? 0));

@@ -6,15 +6,18 @@ import type { TaskInfo } from '../../types/analysis';
  */
 interface TaskItemProps {
   task: TaskInfo;
+  onCancel?: (taskId: string) => void;
+  cancelling?: boolean;
 }
 
 /**
  * 单个任务项
  */
-const TaskItem: React.FC<TaskItemProps> = ({ task }) => {
+const TaskItem: React.FC<TaskItemProps> = ({ task, onCancel, cancelling = false }) => {
   const isPending = task.status === 'pending';
   const isProcessing = task.status === 'processing';
   const isWaitingForFundamentals = task.status === 'waiting_for_fundamentals';
+  const isActive = isPending || isProcessing || isWaitingForFundamentals;
 
   return (
     <div className="flex items-center gap-3 px-3 py-2 bg-elevated rounded-lg border border-white/5">
@@ -68,7 +71,7 @@ const TaskItem: React.FC<TaskItemProps> = ({ task }) => {
       </div>
 
       {/* 状态标签 */}
-      <div className="flex-shrink-0">
+      <div className="flex-shrink-0 flex items-center gap-2">
         <span
           className={`text-xs px-1.5 py-0.5 rounded ${
             isWaitingForFundamentals
@@ -80,6 +83,16 @@ const TaskItem: React.FC<TaskItemProps> = ({ task }) => {
         >
           {isWaitingForFundamentals ? 'Waiting For Fundamentals' : isProcessing ? 'Analyzing' : 'Pending'}
         </span>
+        {isActive && onCancel ? (
+          <button
+            type="button"
+            onClick={() => onCancel(task.taskId)}
+            disabled={cancelling}
+            className="text-xs px-2 py-0.5 rounded border border-red-400/20 bg-red-400/10 text-red-300 disabled:opacity-50"
+          >
+            {cancelling ? 'Cancelling...' : 'Cancel'}
+          </button>
+        ) : null}
       </div>
     </div>
   );
@@ -97,6 +110,10 @@ interface TaskPanelProps {
   title?: string;
   /** 自定义类名 */
   className?: string;
+  /** 取消任务 */
+  onCancelTask?: (taskId: string) => void;
+  /** 正在取消中的任务 */
+  cancellingTaskIds?: string[];
 }
 
 /**
@@ -108,6 +125,8 @@ export const TaskPanel: React.FC<TaskPanelProps> = ({
   visible = true,
   title = 'Analysis Tasks',
   className = '',
+  onCancelTask,
+  cancellingTaskIds = [],
 }) => {
   // 筛选活跃任务（pending 和 processing）
   const activeTasks = tasks.filter(
@@ -160,7 +179,12 @@ export const TaskPanel: React.FC<TaskPanelProps> = ({
       {/* 任务列表 */}
       <div className="p-2 space-y-2 max-h-64 overflow-y-auto">
         {activeTasks.map((task) => (
-          <TaskItem key={task.taskId} task={task} />
+          <TaskItem
+            key={task.taskId}
+            task={task}
+            onCancel={onCancelTask}
+            cancelling={cancellingTaskIds.includes(task.taskId)}
+          />
         ))}
       </div>
     </div>

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { marked } from 'marked';
 import './team.css';
 
 type Provider = 'anthropic' | 'google';
@@ -109,14 +110,85 @@ function todayLocal() {
   return new Date().toISOString().slice(0, 10);
 }
 
-function downloadText(filename: string, content: string, type = 'text/plain;charset=utf-8') {
-  const blob = new Blob([content], { type });
-  const url = URL.createObjectURL(blob);
-  const anchor = document.createElement('a');
-  anchor.href = url;
-  anchor.download = filename;
-  anchor.click();
-  URL.revokeObjectURL(url);
+function renderMarkdown(text: string) {
+  return marked.parse(text || '', { async: false }) as string;
+}
+
+// Opens the report as a styled page and triggers the print dialog, so it can be saved as PDF.
+function downloadPdf(result: TeamRunResponse) {
+  const reportSections = ROLE_META
+    .filter((role) => result.reports?.[role.key]?.trim())
+    .map((role) => ({ title: `${role.icon} ${role.label} Report`, body: result.reports[role.key], hero: false }));
+  const sections = [
+    { title: '📋 Final Decision', body: result.final_decision, hero: true },
+    ...(result.investment_plan ? [{ title: '💼 Investment Plan', body: result.investment_plan, hero: false }] : []),
+    ...reportSections,
+  ];
+
+  const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>${result.stock_code} Team Report — ${result.trade_date}</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif; font-size: 14px; line-height: 1.7; color: #1a1a1a; max-width: 820px; margin: 0 auto; padding: 52px 48px; }
+  h1.report-title { font-size: 28px; font-weight: 700; margin-bottom: 6px; }
+  .meta { color: #666; font-size: 12px; margin-bottom: 44px; border-bottom: 1px solid #e8e8e8; padding-bottom: 16px; }
+  .section { margin-bottom: 36px; }
+  .section-label { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .12em; color: #888; margin-bottom: 12px; }
+  .section-body h1,.section-body h2,.section-body h3,.section-body h4 { font-weight: 700; margin: 18px 0 8px; line-height: 1.3; }
+  .section-body h1 { font-size: 20px; } .section-body h2 { font-size: 17px; } .section-body h3 { font-size: 15px; color: #333; } .section-body h4 { font-size: 14px; }
+  .section-body p { margin-bottom: 10px; }
+  .section-body ul, .section-body ol { padding-left: 20px; margin-bottom: 10px; }
+  .section-body li { margin-bottom: 4px; }
+  .section-body strong { font-weight: 700; }
+  .section-body em { font-style: italic; }
+  .section-body code { background: #f4f4f4; padding: 1px 5px; border-radius: 3px; font-size: 13px; font-family: monospace; }
+  .section-body hr { border: none; border-top: 1px solid #e0e0e0; margin: 16px 0; }
+  .section-body table { width: 100%; border-collapse: collapse; margin-bottom: 12px; font-size: 13px; }
+  .section-body th, .section-body td { border: 1px solid #ddd; padding: 6px 10px; text-align: left; }
+  .section-body th { background: #f7f7f7; font-weight: 600; }
+  .hero { background: #fffbef; border: 1px solid #f0d070; border-radius: 10px; padding: 24px 28px; }
+  .hero .section-label { color: #a07800; }
+  .divider { border: none; border-top: 1px solid #ebebeb; margin: 36px 0; }
+  @media print { body { padding: 20px 28px; } @page { margin: 1.5cm; } }
+</style>
+</head>
+<body>
+<h1 class="report-title">${result.stock_code} — Multi-Agent Team Analysis</h1>
+<div class="meta">
+  <strong>Date:</strong> ${result.trade_date} &nbsp;|&nbsp;
+  <strong>Provider:</strong> ${result.llm_provider} &nbsp;|&nbsp;
+  <strong>Deep Model:</strong> ${result.deep_model} &nbsp;|&nbsp;
+  <strong>Quick Model:</strong> ${result.quick_model} &nbsp;|&nbsp;
+  <strong>Roles:</strong> ${result.roles.join(', ')}
+</div>
+${sections.map((section, index) => `
+${index > 0 ? '<hr class="divider">' : ''}
+<div class="section${section.hero ? ' hero' : ''}">
+  <div class="section-label">${section.title}</div>
+  <div class="section-body">${renderMarkdown(section.body || '')}</div>
+</div>`).join('')}
+</body></html>`;
+
+  const win = window.open('', '_blank');
+  if (!win) return;
+  win.document.write(html);
+  win.document.close();
+  setTimeout(() => win.print(), 500);
+}
+
+// The last finished run is kept in the browser so it survives a page refresh.
+const RESULT_STORAGE_KEY = 'team_last_result';
+
+function loadStoredResult(): TeamRunResponse | null {
+  try {
+    const raw = localStorage.getItem(RESULT_STORAGE_KEY);
+    return raw ? (JSON.parse(raw) as TeamRunResponse) : null;
+  } catch {
+    return null;
+  }
 }
 
 export default function TeamApp() {
@@ -128,7 +200,7 @@ export default function TeamApp() {
   const [roles, setRoles] = useState<Role[]>(['market', 'social', 'news', 'fundamentals', 'ivy']);
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [result, setResult] = useState<TeamRunResponse | null>(null);
+  const [result, setResult] = useState<TeamRunResponse | null>(loadStoredResult);
   const [taskInfo, setTaskInfo] = useState<TeamTaskInfo | null>(null);
   const ivySelected = roles.includes('ivy');
 
@@ -141,6 +213,26 @@ export default function TeamApp() {
       setTradeDate(todayLocal());
     }
   }, [ivySelected]);
+
+  useEffect(() => {
+    if (!result) return;
+    try {
+      localStorage.setItem(RESULT_STORAGE_KEY, JSON.stringify(result));
+    } catch {
+      // Storage may be full or blocked; the result just won't survive a refresh.
+    }
+  }, [result]);
+
+  function handleClear() {
+    setResult(null);
+    setTaskInfo(null);
+    setError(null);
+    try {
+      localStorage.removeItem(RESULT_STORAGE_KEY);
+    } catch {
+      // Ignore blocked storage.
+    }
+  }
 
   const workflow = useMemo(() => {
     if (taskInfo?.workflow?.length) return taskInfo.workflow;
@@ -225,40 +317,41 @@ export default function TeamApp() {
     }
   }
 
+  // Poll the task status every 3s while it runs.
   useEffect(() => {
     const taskId = taskInfo?.task_id;
-    if (!taskId) return;
+    if (!taskId || !running) return;
 
-    const source = new EventSource('/api/v1/team/tasks/stream');
-
-    const parse = (raw: MessageEvent<string>) => {
-      const payload = JSON.parse(raw.data) as TeamTaskInfo;
-      if (payload.task_id !== taskId) return;
-      setTaskInfo(payload);
-      if (payload.result) {
-        setResult(payload.result);
+    let cancelled = false;
+    async function poll() {
+      while (!cancelled) {
+        try {
+          const response = await fetch(`/api/v1/team/status/${taskId}`);
+          if (!response.ok) throw new Error('status fetch failed');
+          const payload = (await response.json()) as TeamTaskInfo;
+          if (cancelled) return;
+          setTaskInfo(payload);
+          if (payload.result) setResult(payload.result);
+          if (payload.status === 'completed') {
+            setRunning(false);
+            return;
+          }
+          if (payload.status === 'failed') {
+            setRunning(false);
+            setError(payload.error || 'Team workflow failed');
+            return;
+          }
+        } catch {
+          // Transient errors: keep polling.
+        }
+        await new Promise((resolve) => setTimeout(resolve, 3000));
       }
-      if (payload.status === 'completed') {
-        setRunning(false);
-        source.close();
-      }
-      if (payload.status === 'failed') {
-        setRunning(false);
-        setError(payload.error || 'Team workflow failed');
-        source.close();
-      }
+    }
+    void poll();
+    return () => {
+      cancelled = true;
     };
-
-    source.addEventListener('team_task_created', parse as EventListener);
-    source.addEventListener('team_task_started', parse as EventListener);
-    source.addEventListener('team_task_updated', parse as EventListener);
-    source.addEventListener('team_task_completed', parse as EventListener);
-    source.addEventListener('team_task_failed', parse as EventListener);
-    source.onerror = () => {
-      source.close();
-    };
-    return () => source.close();
-  }, [taskInfo?.task_id]);
+  }, [taskInfo?.task_id, running]);
 
   return (
     <div className="team-shell">
@@ -350,19 +443,11 @@ export default function TeamApp() {
             </button>
             {result ? (
               <>
-                <button
-                  type="button"
-                  className="team-secondary-btn"
-                  onClick={() => downloadText(`${result.stock_code}_team_report.md`, result.markdown_report, 'text/markdown;charset=utf-8')}
-                >
-                  Download Markdown
+                <button type="button" className="team-secondary-btn" onClick={() => downloadPdf(result)}>
+                  Download PDF
                 </button>
-                <button
-                  type="button"
-                  className="team-secondary-btn"
-                  onClick={() => downloadText(`${result.stock_code}_team_state.json`, JSON.stringify(result, null, 2), 'application/json;charset=utf-8')}
-                >
-                  Download JSON
+                <button type="button" className="team-secondary-btn" onClick={handleClear}>
+                  Clear
                 </button>
               </>
             ) : null}

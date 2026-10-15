@@ -121,6 +121,18 @@ export const analysisApi = {
   },
 
   /**
+   * 取消任务
+   * @param taskId 任务 ID
+   */
+  cancelTask: async (taskId: string): Promise<TaskStatus> => {
+    const response = await apiClient.delete<Record<string, unknown>>(
+      `/api/v1/analysis/tasks/${taskId}`
+    );
+
+    return toCamelCase<TaskStatus>(response.data);
+  },
+
+  /**
    * 获取 SSE 流 URL
    * 用于 EventSource 连接
    */
