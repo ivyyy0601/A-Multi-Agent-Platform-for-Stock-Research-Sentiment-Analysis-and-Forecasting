@@ -105,6 +105,115 @@ CREATE TABLE IF NOT EXISTS batch_request_map (
     article_ids   TEXT NOT NULL,
     PRIMARY KEY (batch_id, custom_id)
 );
+
+CREATE TABLE IF NOT EXISTS platform_sentiment (
+    ticker          TEXT NOT NULL,
+    date            TEXT NOT NULL,
+    platform        TEXT NOT NULL,  -- 'reddit' / 'twitter' / 'news'
+    buzz_score      REAL,
+    sentiment_score REAL,
+    bullish_pct     INTEGER,
+    bearish_pct     INTEGER,
+    mentions        INTEGER,
+    source_count    INTEGER,
+    PRIMARY KEY (ticker, date, platform)
+);
+
+CREATE TABLE IF NOT EXISTS platform_posts (
+    id              TEXT NOT NULL,
+    ticker          TEXT NOT NULL,
+    date            TEXT NOT NULL,
+    platform        TEXT NOT NULL,
+    text            TEXT,
+    sentiment_label TEXT,
+    sentiment_score REAL,
+    upvotes         INTEGER,
+    likes           INTEGER,
+    retweets        INTEGER,
+    subreddit       TEXT,
+    author          TEXT,
+    source          TEXT,
+    created_utc     TEXT,
+    PRIMARY KEY (id, ticker)
+);
+CREATE INDEX IF NOT EXISTS idx_platform_posts_ticker_date ON platform_posts(ticker, date);
+
+CREATE TABLE IF NOT EXISTS adanos_model_runs (
+    run_date             TEXT PRIMARY KEY,
+    ticker_scope         TEXT NOT NULL,
+    model_type           TEXT NOT NULL,
+    selected_params_json TEXT NOT NULL,
+    lr_accuracy          REAL,
+    walkforward_accuracy REAL,
+    baseline             REAL,
+    n_rows               INTEGER,
+    trained_at           TEXT NOT NULL,
+    meta_json            TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS adanos_forecasts (
+    ticker               TEXT NOT NULL,
+    forecast_date        TEXT NOT NULL,
+    target_date          TEXT NOT NULL,
+    created_at           TEXT NOT NULL,
+    direction            TEXT NOT NULL,
+    confidence           REAL NOT NULL,
+    lr_p_up              REAL,
+    cosine_up_ratio      REAL,
+    cosine_avg_ret       REAL,
+    cosine_weighted_ret  REAL,
+    overall              TEXT,
+    raw_json             TEXT NOT NULL,
+    PRIMARY KEY (ticker, forecast_date)
+);
+CREATE INDEX IF NOT EXISTS idx_adanos_forecasts_target_date ON adanos_forecasts(target_date);
+
+CREATE TABLE IF NOT EXISTS detail_forecasts (
+    symbol               TEXT NOT NULL,
+    window_days          INTEGER NOT NULL,
+    forecast_date        TEXT NOT NULL,
+    created_at           TEXT NOT NULL,
+    raw_json             TEXT NOT NULL,
+    PRIMARY KEY (symbol, window_days, forecast_date)
+);
+CREATE INDEX IF NOT EXISTS idx_detail_forecasts_symbol_window_date
+ON detail_forecasts(symbol, window_days, forecast_date DESC);
+
+CREATE TABLE IF NOT EXISTS automation_runs (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    pipeline      TEXT NOT NULL,
+    run_date      TEXT NOT NULL,
+    status        TEXT NOT NULL,
+    current_step  TEXT,
+    message       TEXT,
+    started_at    TEXT NOT NULL,
+    finished_at   TEXT,
+    details_json  TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_automation_runs_pipeline_started ON automation_runs(pipeline, started_at DESC);
+
+CREATE TABLE IF NOT EXISTS research_reports (
+    id          TEXT PRIMARY KEY,
+    symbol      TEXT NOT NULL,
+    company     TEXT,
+    report_type TEXT NOT NULL,
+    analyst     TEXT,
+    content     TEXT NOT NULL,
+    sources     TEXT,
+    created_at  TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_research_reports_symbol ON research_reports(symbol);
+CREATE INDEX IF NOT EXISTS idx_research_reports_created ON research_reports(created_at DESC);
+
+CREATE TABLE IF NOT EXISTS research_notes (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    report_id   TEXT,
+    symbol      TEXT NOT NULL,
+    analyst     TEXT,
+    content     TEXT NOT NULL,
+    created_at  TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_research_notes_symbol ON research_notes(symbol);
 """
 
 
@@ -116,11 +225,12 @@ def get_conn() -> sqlite3.Connection:
     return conn
 
 
-def init_db():
+def init_db(verbose: bool = True):
     conn = get_conn()
     conn.executescript(SCHEMA)
     conn.close()
-    print(f"Database initialized at {settings.database_path}")
+    if verbose:
+        print(f"Database initialized at {settings.database_path}")
 
 
 if __name__ == "__main__":

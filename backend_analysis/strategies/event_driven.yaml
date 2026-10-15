@@ -1,0 +1,49 @@
+name: event_driven
+display_name: Event-Driven Analysis
+description: Analyze the impact of a specific news event or catalyst on a stock. Use when there is a clear event (product launch, regulatory decision, M&A, macro shock, analyst upgrade/downgrade).
+category: framework
+core_rules: [1, 3, 5]
+required_tools:
+  - get_iv_news
+  - get_iv_forecast
+  - get_iv_similar_days
+  - get_iv_social
+
+instructions: |
+  **Event-Driven Analysis Framework**
+
+  Use this skill when a specific catalyst is driving discussion around a stock.
+
+  ## Step 1 — Identify the Event
+  - Call `get_iv_news(symbol)` and identify the primary catalyst from the titles and key_discussion fields.
+  - Classify the event type:
+    - **Macro**: rate decision, tariff, geopolitical, sector regulation
+    - **Company-specific**: product launch, earnings pre-announcement, management change, lawsuit, buyback
+    - **Market structure**: analyst rating change, index inclusion/exclusion, short squeeze
+
+  ## Step 2 — Assess Directional Impact
+  From the news `reason_growth` and `reason_decrease` fields, determine:
+  - What is the bull case for this event? (concrete mechanism, not vague)
+  - What is the bear case?
+  - Who benefits most / is most exposed?
+
+  ## Step 3 — Historical Precedent
+  - Call `get_iv_similar_days(symbol)` to find past dates with similar news patterns.
+  - Check what `ret_t1` and `ret_t3` were after those events.
+  - Note any pattern: does the stock tend to fade the initial reaction?
+
+  ## Step 4 — Sentiment Check
+  - Call `get_iv_social(symbol)` to see if retail sentiment aligns with or contradicts the event direction.
+  - Strong disagreement between news sentiment and social sentiment is worth flagging.
+
+  ## Step 5 — ML Signal
+  - Call `get_iv_forecast(symbol, horizon="1")` for the short-term ML view.
+  - Does the model agree with your event analysis? Note if divergent.
+
+  ## Output Format
+  1. **Event** — one-sentence description of the catalyst
+  2. **Bull Case** — specific mechanism (2-3 sentences)
+  3. **Bear Case** — specific mechanism (2-3 sentences)
+  4. **Historical Precedent** — what happened after similar events
+  5. **Signal** — Bullish / Neutral / Bearish + confidence level
+  6. **Key Risk** — the single most important thing that could invalidate the bull/bear case

@@ -1,0 +1,10 @@
+data/
+data.db
+pokieticker.db
+venv/
+__pycache__/
+*.py[cod]
+logs/
+*.log
+*.db
+*.db-journal

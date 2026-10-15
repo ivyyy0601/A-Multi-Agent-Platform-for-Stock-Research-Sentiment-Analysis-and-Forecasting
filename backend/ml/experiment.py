@@ -2,6 +2,9 @@
 
 import numpy as np
 from xgboost import XGBClassifier
+from sklearn.pipeline import Pipeline
+from sklearn.impute import SimpleImputer
+from sklearn.preprocessing import StandardScaler
 from sklearn.linear_model import LogisticRegression
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
@@ -43,10 +46,6 @@ def _expanding_cv(X, y, n_folds=5, min_train=200, model_cls=None, model_kwargs=N
             )
         else:
             model = model_cls(**(model_kwargs or {}))
-
-        # Handle NaN
-        X_tr = np.nan_to_num(X_tr, nan=0.0)
-        X_te = np.nan_to_num(X_te, nan=0.0)
 
         model.fit(X_tr, y_tr)
         y_p = model.predict(X_te)
@@ -92,17 +91,37 @@ def run_experiment(symbol: str):
 
     targets = {
         "direction_t1":     "target_t1",
-        "direction_t2":     "target_t2",
-        "direction_t3":     "target_t3",
+        "direction_t7":     "target_t7",
+        "direction_t14":    "target_t14",
         "big_move_1pct":    "target_big1_t1",
-        "big_move_2pct":    "target_big2_t1",
+        "big_move_7d":      "target_big_t7",
+        "big_move_14d":     "target_big_t14",
         "up_big_1pct":      "target_up_big_t1",
+        "up_big_7d":        "target_up_big_t7",
+        "up_big_14d":       "target_up_big_t14",
     }
 
     models = {
         "XGBoost":  (None, None),
-        "LogReg":   (LogisticRegression, {"max_iter": 1000, "C": 0.1, "random_state": 42}),
-        "RF":       (RandomForestClassifier, {"n_estimators": 200, "max_depth": 6, "random_state": 42}),
+        "LogReg":   (
+            Pipeline,
+            {
+                "steps": [
+                    ("imputer", SimpleImputer(strategy="constant", fill_value=0.0)),
+                    ("scaler", StandardScaler()),
+                    ("clf", LogisticRegression(max_iter=1000, C=1.0, class_weight="balanced", random_state=42)),
+                ]
+            },
+        ),
+        "RF":       (
+            Pipeline,
+            {
+                "steps": [
+                    ("imputer", SimpleImputer(strategy="constant", fill_value=0.0)),
+                    ("clf", RandomForestClassifier(n_estimators=250, max_depth=6, class_weight="balanced", random_state=42)),
+                ]
+            },
+        ),
     }
 
     # Run combinations
@@ -117,6 +136,7 @@ def run_experiment(symbol: str):
             # Only use columns that exist
             valid_cols = [c for c in feat_cols if c in sub.columns]
             X = sub[valid_cols].values.astype(np.float64)
+            X = np.nan_to_num(X, nan=0.0)
 
             for model_name, (model_cls, model_kw) in models.items():
                 r = _expanding_cv(X, y, n_folds=5, min_train=200,

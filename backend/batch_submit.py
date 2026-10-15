@@ -1,28 +1,30 @@
-"""Submit Layer 1 analysis to Anthropic Batch API for top N tickers.
+"""Submit pending articles to Anthropic Batch API for Layer 1 analysis.
 
-Usage: python -m backend.batch_submit [--top 50]
+Usage: python -m backend.batch_submit [--top 100]
+
+After submission, wait a few hours, then run:
+    python -m backend.batch_collect
 """
 
 import json
 import sys
-import time
+from datetime import datetime, timezone
 from typing import List, Dict, Any
 
 import anthropic
 
 from backend.config import settings
 from backend.database import get_conn
-from backend.pipeline.layer1 import (
-    get_pending_articles, _build_batch_prompt, BATCH_SIZE, MODEL, MAX_OUTPUT_TOKENS
-)
+from backend.pipeline.layer1 import get_pending_articles, _build_batch_prompt, BATCH_SIZE
+
+MODEL = "claude-haiku-4-5-20251001"
 
 
-def get_top_tickers(n: int = 50) -> List[Dict[str, Any]]:
-    """Get top N tickers by Layer 0 passed count, with pending articles."""
+def get_top_tickers(n: int = 100) -> List[Dict[str, Any]]:
     conn = get_conn()
     rows = conn.execute("""
         SELECT l0.symbol, t.name,
-               sum(case when l0.passed=1 then 1 else 0 end) as passed
+               SUM(CASE WHEN l0.passed=1 THEN 1 ELSE 0 END) as passed
         FROM layer0_results l0
         JOIN tickers t ON l0.symbol = t.symbol
         GROUP BY l0.symbol
@@ -33,126 +35,99 @@ def get_top_tickers(n: int = 50) -> List[Dict[str, Any]]:
     return [dict(r) for r in rows]
 
 
-def build_batch_requests(
-    symbols: List[str],
-) -> tuple[list, dict]:
-    """Build all batch requests for given symbols.
+def submit_pending_batch(top_n: int = 100) -> dict:
+    tickers = get_top_tickers(top_n)
+    symbols = [t["symbol"] for t in tickers]
 
-    Returns (requests_list, mapping_dict) where mapping_dict maps
-    custom_id -> (symbol, [article_ids]).
-    """
-    all_requests = []
-    mapping = {}  # custom_id -> (symbol, article_ids_list)
+    client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
+
+    requests = []
+    mapping = []
+    total_articles = 0
 
     for symbol in symbols:
         articles = get_pending_articles(symbol)
         if not articles:
-            print(f"  {symbol}: no pending articles, skip")
             continue
 
-        for chunk_idx in range(0, len(articles), BATCH_SIZE):
-            chunk = articles[chunk_idx:chunk_idx + BATCH_SIZE]
-            custom_id = f"{symbol}_{chunk_idx:05d}"
+        print(f"[{symbol}] {len(articles)} pending articles")
+        total_articles += len(articles)
 
+        for i in range(0, len(articles), BATCH_SIZE):
+            chunk = articles[i:i + BATCH_SIZE]
             prompt = _build_batch_prompt(symbol, chunk)
-            article_ids = [a["id"] for a in chunk]
+            custom_id = f"{symbol}_{i}_{len(chunk)}"
 
-            all_requests.append({
+            requests.append({
                 "custom_id": custom_id,
                 "params": {
                     "model": MODEL,
-                    "max_tokens": MAX_OUTPUT_TOKENS,
+                    "max_tokens": 4096,
                     "messages": [{"role": "user", "content": prompt}],
                 },
             })
-            mapping[custom_id] = (symbol, article_ids)
+            mapping.append({
+                "custom_id": custom_id,
+                "symbol": symbol,
+                "article_ids": [a["id"] for a in chunk],
+            })
 
-        print(f"  {symbol}: {len(articles)} articles -> {len(range(0, len(articles), BATCH_SIZE))} requests")
+    if not requests:
+        return {
+            "submitted": False,
+            "batch_id": None,
+            "total_articles": 0,
+            "request_count": 0,
+            "status": "noop",
+        }
 
-    return all_requests, mapping
-
-
-def submit_batch(requests_list: list, mapping: dict) -> str:
-    """Submit to Anthropic Batch API and save mapping to database."""
-    client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
-
-    print(f"\nSubmitting {len(requests_list)} requests to Batch API...")
-    batch = client.messages.batches.create(requests=requests_list)
+    batch = client.messages.batches.create(requests=requests)
     batch_id = batch.id
-    print(f"Batch ID: {batch_id}")
-    print(f"Status: {batch.processing_status}")
 
-    # Save batch job
     conn = get_conn()
-    total_articles = sum(len(v[1]) for v in mapping.values())
     conn.execute(
-        """INSERT OR REPLACE INTO batch_jobs
-           (batch_id, symbol, status, total, created_at)
-           VALUES (?, ?, ?, ?, datetime('now'))""",
-        (batch_id, "multi", batch.processing_status, total_articles),
+        """INSERT INTO batch_jobs (batch_id, symbol, status, total, created_at)
+           VALUES (?, ?, ?, ?, ?)""",
+        (batch_id, "all", batch.processing_status, total_articles,
+         datetime.now(timezone.utc).isoformat()),
     )
-
-    # Save request mapping
-    for custom_id, (symbol, article_ids) in mapping.items():
+    for m in mapping:
         conn.execute(
-            """INSERT OR REPLACE INTO batch_request_map
-               (batch_id, custom_id, symbol, article_ids)
+            """INSERT INTO batch_request_map (batch_id, custom_id, symbol, article_ids)
                VALUES (?, ?, ?, ?)""",
-            (batch_id, custom_id, symbol, json.dumps(article_ids)),
-        )
-
+            (batch_id, m["custom_id"], m["symbol"], json.dumps(m["article_ids"])),
+    )
     conn.commit()
     conn.close()
 
-    return batch_id
+    return {
+        "submitted": True,
+        "batch_id": batch_id,
+        "total_articles": total_articles,
+        "request_count": len(requests),
+        "status": batch.processing_status,
+    }
 
 
 def main():
-    top_n = 50
-    if len(sys.argv) > 1:
-        for i, arg in enumerate(sys.argv):
-            if arg == "--top" and i + 1 < len(sys.argv):
-                top_n = int(sys.argv[i + 1])
+    top_n = 100
+    if "--top" in sys.argv:
+        idx = sys.argv.index("--top")
+        if idx + 1 < len(sys.argv):
+            top_n = int(sys.argv[idx + 1])
 
-    print(f"=== Layer 1 Batch API Submission (top {top_n} tickers) ===\n")
-
-    # Get top tickers
-    tickers = get_top_tickers(top_n)
-    symbols = [t["symbol"] for t in tickers]
-
-    total_pending = 0
-    for t in tickers:
-        total_pending += t["passed"]
-    print(f"Top {len(tickers)} tickers, ~{total_pending} Layer0-passed articles")
-    print(f"(Already processed by Layer1 will be excluded)\n")
-
-    # Build requests
-    print("Building batch requests...")
-    requests_list, mapping = build_batch_requests(symbols)
-
-    if not requests_list:
-        print("No pending articles to process!")
+    print(f"=== Layer 1 Batch Submit (Anthropic Haiku, top {top_n} tickers) ===\n")
+    result = submit_pending_batch(top_n=top_n)
+    if not result["submitted"]:
+        print("No pending articles found.")
         return
 
-    total_articles = sum(len(v[1]) for v in mapping.values())
-
-    # Cost estimate
-    est_input_tokens = total_articles * 300
-    est_output_tokens = total_articles * 80
-    est_cost = (est_input_tokens / 1_000_000 * 0.5) + (est_output_tokens / 1_000_000 * 2.5)
-
-    print(f"\n=== Summary ===")
-    print(f"Tickers: {len(symbols)}")
-    print(f"Total articles: {total_articles:,}")
-    print(f"Batch requests: {len(requests_list)}")
-    print(f"Estimated cost: ~${est_cost:.2f} (Batch API pricing)")
-    print()
-
-    # Submit
-    batch_id = submit_batch(requests_list, mapping)
-
-    print(f"\nBatch submitted! ID: {batch_id}")
-    print(f"Check status: python -m backend.batch_collect {batch_id}")
+    print(f"\nTotal: {result['total_articles']} articles → {result['request_count']} batch requests")
+    print("Submitting to Anthropic Batch API...")
+    print(f"\nSubmitted! Batch ID: {result['batch_id']}")
+    print(f"Status: {result['status']}")
+    print(f"\nRun later to collect results:")
+    print(f"  python -m backend.batch_collect")
 
 
 if __name__ == "__main__":

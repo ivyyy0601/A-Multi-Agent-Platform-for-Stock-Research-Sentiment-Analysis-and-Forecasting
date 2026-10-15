@@ -10,9 +10,13 @@ interface SimilarDay {
   date: string;
   similarity: number;
   sentiment_score: number;
+  n_relevant: number;
   n_articles: number;
   ret_1d: number | null;
+  ret_5d: number | null;
   rsi_14: number;
+  volatility_5d: number | null;
+  ma5_vs_ma20: number | null;
   ret_t1_after: number | null;
   ret_t5_after: number | null;
   news: NewsSnippet[];
@@ -28,6 +32,10 @@ interface SimilarDaysData {
     up_ratio_t5: number | null;
     avg_ret_t1: number | null;
     avg_ret_t5: number | null;
+    weighted_up_ratio_t1: number | null;
+    weighted_up_ratio_t5: number | null;
+    weighted_avg_ret_t1: number | null;
+    weighted_avg_ret_t5: number | null;
     count: number;
   };
 }
@@ -74,7 +82,7 @@ export default function SimilarDaysPanel({ symbol, date, onClose }: Props) {
         <div className="news-list">
           {/* Target day info */}
           <div className="sim-target-card">
-            <div className="sim-section-label">Target Day Features</div>
+            <div className="sim-section-label">Today Features</div>
             <div className="sim-feat-grid">
               <div className="sim-feat">
                 <span className="sim-feat-label">Sentiment</span>
@@ -83,8 +91,8 @@ export default function SimilarDaysPanel({ symbol, date, onClose }: Props) {
                 </span>
               </div>
               <div className="sim-feat">
-                <span className="sim-feat-label">Articles</span>
-                <span className="sim-feat-val">{data.target_features.n_articles ?? 0}</span>
+                <span className="sim-feat-label">Relevant</span>
+                <span className="sim-feat-val">{data.target_features.n_relevant ?? 0}</span>
               </div>
               <div className="sim-feat">
                 <span className="sim-feat-label">RSI</span>
@@ -96,6 +104,30 @@ export default function SimilarDaysPanel({ symbol, date, onClose }: Props) {
                   {((data.target_features.ret_1d ?? 0) * 100).toFixed(1)}%
                 </span>
               </div>
+              <div className="sim-feat">
+                <span className="sim-feat-label">Prev 5D</span>
+                <span className={`sim-feat-val ${(data.target_features.ret_5d ?? 0) >= 0 ? 'up' : 'down'}`}>
+                  {((data.target_features.ret_5d ?? 0) * 100).toFixed(1)}%
+                </span>
+              </div>
+              <div className="sim-feat">
+                <span className="sim-feat-label">Vol 5D</span>
+                <span className="sim-feat-val">
+                  {((data.target_features.volatility_5d ?? 0) * 100).toFixed(1)}%
+                </span>
+              </div>
+              <div className="sim-feat">
+                <span className="sim-feat-label">MA5 vs 20</span>
+                <span className={`sim-feat-val ${(data.target_features.ma5_vs_ma20 ?? 0) >= 0 ? 'up' : 'down'}`}>
+                  {((data.target_features.ma5_vs_ma20 ?? 0) * 100).toFixed(1)}%
+                </span>
+              </div>
+              <div className="sim-feat">
+                <span className="sim-feat-label">Momentum</span>
+                <span className={`sim-feat-val ${(data.target_features.sentiment_momentum_3d ?? 0) >= 0 ? 'up' : 'down'}`}>
+                  {(data.target_features.sentiment_momentum_3d ?? 0).toFixed(2)}
+                </span>
+              </div>
             </div>
           </div>
 
@@ -105,26 +137,32 @@ export default function SimilarDaysPanel({ symbol, date, onClose }: Props) {
             <div className="sim-stats-grid">
               <div className="sim-stat-block">
                 <span className="sim-stat-title">T+1 Up Ratio</span>
-                <span className={`sim-stat-big ${(data.stats.up_ratio_t1 ?? 0) >= 0.5 ? 'up' : 'down'}`}>
-                  {data.stats.up_ratio_t1 !== null ? `${(data.stats.up_ratio_t1 * 100).toFixed(0)}%` : '-'}
+                <span className="sim-stat-sub" style={{ display: 'block', fontSize: '10px', color: '#6b7280', marginTop: '2px' }}>
+                  Frequency
+                </span>
+                <span className={`sim-stat-big ${((data.stats.weighted_up_ratio_t1 ?? data.stats.up_ratio_t1) ?? 0) >= 0.5 ? 'up' : 'down'}`}>
+                  {(data.stats.weighted_up_ratio_t1 ?? data.stats.up_ratio_t1) !== null ? `${(((data.stats.weighted_up_ratio_t1 ?? data.stats.up_ratio_t1) ?? 0) * 100).toFixed(0)}%` : '-'}
                 </span>
               </div>
               <div className="sim-stat-block">
                 <span className="sim-stat-title">T+5 Up Ratio</span>
-                <span className={`sim-stat-big ${(data.stats.up_ratio_t5 ?? 0) >= 0.5 ? 'up' : 'down'}`}>
-                  {data.stats.up_ratio_t5 !== null ? `${(data.stats.up_ratio_t5 * 100).toFixed(0)}%` : '-'}
+                <span className="sim-stat-sub" style={{ display: 'block', fontSize: '10px', color: '#6b7280', marginTop: '2px' }}>
+                  Frequency
+                </span>
+                <span className={`sim-stat-big ${((data.stats.weighted_up_ratio_t5 ?? data.stats.up_ratio_t5) ?? 0) >= 0.5 ? 'up' : 'down'}`}>
+                  {(data.stats.weighted_up_ratio_t5 ?? data.stats.up_ratio_t5) !== null ? `${(((data.stats.weighted_up_ratio_t5 ?? data.stats.up_ratio_t5) ?? 0) * 100).toFixed(0)}%` : '-'}
                 </span>
               </div>
               <div className="sim-stat-block">
                 <span className="sim-stat-title">Avg T+1</span>
-                <span className={`sim-stat-big ${(data.stats.avg_ret_t1 ?? 0) >= 0 ? 'up' : 'down'}`}>
-                  {data.stats.avg_ret_t1 !== null ? `${data.stats.avg_ret_t1 >= 0 ? '+' : ''}${data.stats.avg_ret_t1.toFixed(2)}%` : '-'}
+                <span className={`sim-stat-big ${((data.stats.weighted_avg_ret_t1 ?? data.stats.avg_ret_t1) ?? 0) >= 0 ? 'up' : 'down'}`}>
+                  {(data.stats.weighted_avg_ret_t1 ?? data.stats.avg_ret_t1) !== null ? `${((data.stats.weighted_avg_ret_t1 ?? data.stats.avg_ret_t1) ?? 0) >= 0 ? '+' : ''}${((data.stats.weighted_avg_ret_t1 ?? data.stats.avg_ret_t1) ?? 0).toFixed(2)}%` : '-'}
                 </span>
               </div>
               <div className="sim-stat-block">
                 <span className="sim-stat-title">Avg T+5</span>
-                <span className={`sim-stat-big ${(data.stats.avg_ret_t5 ?? 0) >= 0 ? 'up' : 'down'}`}>
-                  {data.stats.avg_ret_t5 !== null ? `${data.stats.avg_ret_t5 >= 0 ? '+' : ''}${data.stats.avg_ret_t5.toFixed(2)}%` : '-'}
+                <span className={`sim-stat-big ${((data.stats.weighted_avg_ret_t5 ?? data.stats.avg_ret_t5) ?? 0) >= 0 ? 'up' : 'down'}`}>
+                  {(data.stats.weighted_avg_ret_t5 ?? data.stats.avg_ret_t5) !== null ? `${((data.stats.weighted_avg_ret_t5 ?? data.stats.avg_ret_t5) ?? 0) >= 0 ? '+' : ''}${((data.stats.weighted_avg_ret_t5 ?? data.stats.avg_ret_t5) ?? 0).toFixed(2)}%` : '-'}
                 </span>
               </div>
             </div>
@@ -143,11 +181,16 @@ export default function SimilarDaysPanel({ symbol, date, onClose }: Props) {
                   sent {day.sentiment_score.toFixed(2)}
                 </span>
                 <span className="sim-day-chip neutral">
-                  {day.n_articles} news
+                  {day.n_relevant} rel
                 </span>
                 <span className="sim-day-chip neutral">
                   RSI {day.rsi_14.toFixed(0)}
                 </span>
+                {day.ret_1d !== null && (
+                  <span className={`sim-day-chip ${day.ret_1d >= 0 ? 'up' : 'down'}`}>
+                    1D {(day.ret_1d * 100).toFixed(1)}%
+                  </span>
+                )}
               </div>
               <div className="sim-day-returns">
                 <span className="sim-day-ret-label">After:</span>

@@ -1,10 +1,12 @@
-"""Weekly incremental update: fetch new OHLC + news for all active tickers.
+"""Daily incremental update: fetch new OHLC + news for all active tickers.
 
 Only fetches data newer than the last fetch date for each ticker.
 Run manually or via cron: python -m backend.weekly_update
 
-Cron example (every Sunday at 2am):
-  0 2 * * 0 cd /path/to/PokieTicker && python -m backend.weekly_update >> logs/weekly.log 2>&1
+Cron example (every day at 7am):
+  0 7 * * * cd /path/to/PokieTicker && source .venv/bin/activate && python -m backend.weekly_update >> logs/daily.log 2>&1
+  0 9 * * * cd /path/to/PokieTicker && source .venv/bin/activate && python -m backend.batch_submit >> logs/daily.log 2>&1
+  0 11 * * * cd /path/to/PokieTicker && source .venv/bin/activate && python -m backend.batch_collect >> logs/daily.log 2>&1
 """
 
 import json
@@ -161,7 +163,7 @@ def update_news(symbol: str, last_fetch: str) -> int:
 
 
 def main():
-    print(f"=== Weekly Update: {TODAY} ===\n")
+    print(f"=== Daily Update: {TODAY} ===\n")
 
     conn = get_conn()
     tickers = conn.execute(

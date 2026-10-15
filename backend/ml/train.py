@@ -7,7 +7,7 @@ from backend.database import get_conn
 from backend.ml.model import train
 from backend.ml.backtest import run_backtest
 
-HORIZONS = ["t1", "t5"]
+HORIZONS = ["t1", "t7", "t14"]
 
 # Best LSTM configs per ticker (from experiments)
 LSTM_CONFIGS = {
@@ -42,8 +42,15 @@ def main():
             if "error" in result:
                 print(f"  {sym}/{h}: {result['error']}")
             else:
-                print(f"  {sym}/{h}: acc={result['accuracy']:.1%} baseline={result['baseline']:.1%} "
-                      f"(train={result['train_size']}, test={result['test_size']})")
+                print(
+                    f"  {sym}/{h}: holdout={result['accuracy']:.1%} "
+                    f"baseline={result['baseline']:.1%} "
+                    f"cv={result.get('cv_accuracy', 0):.1%} "
+                    f"cv_base={result.get('cv_baseline', 0):.1%} "
+                    f"family={result.get('selected_family', 'xgb')} "
+                    f"params={result.get('selected_params', {})} "
+                    f"(train={result['train_size']}, test={result['test_size']})"
+                )
 
             if args.backtest and "error" not in result:
                 bt = run_backtest(sym, h)

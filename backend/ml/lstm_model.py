@@ -37,11 +37,14 @@ def _load_news_features_filtered(symbol: str, exclude_neutral: bool = False) -> 
         f"""
         SELECT na.trade_date,
                COUNT(*)                                                      AS n_articles,
-               SUM(CASE WHEN l1.sentiment = 'positive' THEN 1 ELSE 0 END)   AS n_positive,
-               SUM(CASE WHEN l1.sentiment = 'negative' THEN 1 ELSE 0 END)   AS n_negative,
-               SUM(CASE WHEN l1.relevance IN ('high','medium') THEN 1 ELSE 0 END) AS n_relevant,
-               AVG(CASE WHEN l1.sentiment = 'positive' THEN 1
-                        WHEN l1.sentiment = 'negative' THEN -1 ELSE 0 END)  AS avg_polarity
+               SUM(CASE WHEN l1.relevance IN ('relevant','high','medium') THEN 1 ELSE 0 END) AS n_relevant,
+               SUM(CASE WHEN l1.relevance IN ('relevant','high','medium') AND l1.sentiment = 'positive' THEN 1 ELSE 0 END)   AS n_positive,
+               SUM(CASE WHEN l1.relevance IN ('relevant','high','medium') AND l1.sentiment = 'negative' THEN 1 ELSE 0 END)   AS n_negative,
+               AVG(CASE
+                       WHEN l1.relevance IN ('relevant','high','medium') AND l1.sentiment = 'positive' THEN 1
+                       WHEN l1.relevance IN ('relevant','high','medium') AND l1.sentiment = 'negative' THEN -1
+                       ELSE 0
+                   END) AS avg_polarity
         FROM news_aligned na
         JOIN layer1_results l1 ON na.news_id = l1.news_id AND na.symbol = l1.symbol
         WHERE na.symbol = ? {where_clause}
@@ -57,10 +60,10 @@ def _load_news_features_filtered(symbol: str, exclude_neutral: bool = False) -> 
 
     df = pd.DataFrame([dict(r) for r in rows])
     df["trade_date"] = pd.to_datetime(df["trade_date"])
-    total = df["n_articles"].clip(lower=1)
-    df["sentiment_score"] = (df["n_positive"] - df["n_negative"]) / total
-    df["positive_ratio"] = df["n_positive"] / total
-    df["negative_ratio"] = df["n_negative"] / total
+    relevant_total = df["n_relevant"].clip(lower=1)
+    df["sentiment_score"] = (df["n_positive"] - df["n_negative"]) / relevant_total
+    df["positive_ratio"] = df["n_positive"] / relevant_total
+    df["negative_ratio"] = df["n_negative"] / relevant_total
     df["polarity_strength"] = df["avg_polarity"].abs()  # how polarized
     return df
 

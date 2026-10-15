@@ -10,11 +10,155 @@ body {
   color: #e0e0e0;
 }
 
+/* ===== Chart Time Range ===== */
+.chart-time-range {
+  display: flex;
+  gap: 4px;
+  padding: 6px 8px 4px;
+  flex-shrink: 0;
+}
+
+.chart-range-btn {
+  padding: 3px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  background: none;
+  border: 1px solid #2a2d3a;
+  border-radius: 4px;
+  color: #666;
+  cursor: pointer;
+  transition: all 0.15s;
+  letter-spacing: 0.3px;
+}
+
+.chart-range-btn:hover {
+  border-color: #444;
+  color: #aaa;
+}
+
+.chart-range-btn.active {
+  background: #1e2a4a;
+  border-color: #6c8fff;
+  color: #6c8fff;
+}
+
+/* ===== App Wrapper + Nav ===== */
+.app-wrapper {
+  height: 100vh;
+  display: flex;
+  flex-direction: row;
+  overflow: hidden;
+  position: relative;
+}
+
+.global-signature {
+  position: fixed;
+  left: 18px;
+  bottom: 12px;
+  z-index: 999;
+  color: rgba(224, 224, 224, 0.58);
+  text-decoration: none;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: lowercase;
+  transition: color 0.18s ease, opacity 0.18s ease;
+  opacity: 0.82;
+}
+
+.global-signature:hover {
+  color: #ffffff;
+  opacity: 1;
+}
+
+.app-nav {
+  width: 68px;
+  background: #13151f;
+  border-right: 1px solid #2a2d3a;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 12px 0;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.app-nav-logo {
+  font-size: 13px;
+  font-weight: 800;
+  color: #6c8fff;
+  letter-spacing: 0.5px;
+  margin-bottom: 12px;
+  text-decoration: none;
+  transition: color 0.18s ease, opacity 0.18s ease;
+}
+
+.app-nav-logo:hover {
+  color: #9bb1ff;
+  opacity: 1;
+}
+
+.app-nav-btn {
+  width: 54px;
+  padding: 8px 4px;
+  background: none;
+  border: none;
+  border-radius: 8px;
+  color: #666;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  transition: background 0.15s, color 0.15s;
+  position: relative;
+}
+
+.app-nav-btn:hover {
+  background: #1e2130;
+  color: #aaa;
+}
+
+.app-nav-btn.active {
+  background: #1e2a4a;
+  color: #6c8fff;
+}
+
+.nav-icon {
+  font-size: 18px;
+  line-height: 1;
+}
+
+.nav-label {
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.3px;
+}
+
+.nav-status-dot {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: #5ee39d;
+  box-shadow: 0 0 0 4px rgba(94, 227, 157, 0.12);
+}
+
+/* Analysis + Sentiment views fill the remaining space */
+.app-wrapper > div:not(.app):not(.app-nav) {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+}
+
 .app {
+  flex: 1;
   height: 100vh;
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  min-width: 0;
 }
 
 /* ===== Header ===== */
@@ -411,6 +555,27 @@ body {
   font-size: 14px;
   font-weight: 600;
 }
+
+.news-source-tabs {
+  display: flex;
+  gap: 4px;
+  padding: 6px 12px;
+  border-bottom: 1px solid #2a2d3a;
+}
+.news-source-tab {
+  padding: 3px 10px;
+  border-radius: 12px;
+  border: 1px solid #3a3d4a;
+  background: transparent;
+  color: #888;
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.news-source-tab:hover { border-color: #555; color: #ccc; }
+.news-source-tab.active { background: #3a3d4a; color: #fff; border-color: #555; }
+.news-source-tab.sentiment-pos.active { background: rgba(0,230,118,0.15); color: #00e676; border-color: #00e676; }
+.news-source-tab.sentiment-neg.active { background: rgba(255,82,82,0.15); color: #ff5252; border-color: #ff5252; }
 
 .news-count {
   color: #666;
@@ -987,6 +1152,19 @@ body {
   border-bottom: none;
 }
 
+.range-popup-close {
+  background: none;
+  border: none;
+  color: #666;
+  font-size: 14px;
+  cursor: pointer;
+  padding: 0 2px;
+  line-height: 1;
+}
+.range-popup-close:hover {
+  color: #ccc;
+}
+
 .range-popup-arrow {
   font-size: 20px;
   color: #555;
@@ -1087,6 +1265,28 @@ body {
   padding: 8px 16px;
   cursor: pointer;
   user-select: none;
+}
+
+.pred-window-toggle {
+  display: flex;
+  gap: 4px;
+  margin-left: auto;
+}
+
+.pred-window-btn {
+  padding: 2px 10px;
+  border-radius: 12px;
+  border: 1px solid #444;
+  background: transparent;
+  color: #aaa;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.pred-window-btn.active {
+  background: #3a7bd5;
+  border-color: #3a7bd5;
+  color: #fff;
 }
 
 .pred-title {
@@ -2280,6 +2480,49 @@ body {
   color: #ef5350;
 }
 
+.range-news-section-title-btn {
+  width: 100%;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: none;
+  border: none;
+  border-bottom: 1px solid #2a2d3a;
+  font-size: 13px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  padding: 8px 4px 8px;
+  cursor: pointer;
+  margin-bottom: 4px;
+}
+
+.range-section-chevron {
+  font-size: 10px;
+  color: #555;
+}
+
+.range-section-body {
+  display: flex;
+  flex-direction: column;
+}
+
+.range-news-more-btn {
+  background: none;
+  border: 1px solid #2a2d3a;
+  border-radius: 6px;
+  color: #888;
+  font-size: 11px;
+  padding: 5px 10px;
+  cursor: pointer;
+  margin: 4px 0 8px;
+  text-align: center;
+}
+.range-news-more-btn:hover {
+  color: #ccc;
+  border-color: #444;
+}
+
 .range-news-all {
   margin-top: 8px;
   border-top: 1px solid #2a2d3a;
@@ -2604,5 +2847,119 @@ body {
   }
   .reason {
     font-size: 12px;
+  }
+}
+
+/* DatePickerPopup */
+.datepicker-wrap {
+  position: relative;
+}
+
+.datepicker-btn {
+  padding: 5px 12px;
+  border-radius: 8px;
+  border: 1px solid #444;
+  background: #1e1e1e;
+  color: #ccc;
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.datepicker-btn-active {
+  border-color: #3a7bd5;
+  color: #fff;
+}
+
+.datepicker-popup {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  background: #1e1e1e;
+  border: 1px solid #444;
+  border-radius: 10px;
+  padding: 14px;
+  z-index: 1000;
+  min-width: 220px;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+}
+
+.datepicker-mode-row {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.datepicker-mode-btn {
+  flex: 1;
+  padding: 4px 0;
+  border-radius: 6px;
+  border: 1px solid #444;
+  background: transparent;
+  color: #aaa;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.datepicker-mode-btn.active {
+  background: #3a7bd5;
+  border-color: #3a7bd5;
+  color: #fff;
+}
+
+.datepicker-inputs {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.datepicker-label {
+  font-size: 11px;
+  color: #888;
+}
+
+.datepicker-input {
+  background: #2a2a2a;
+  border: 1px solid #444;
+  border-radius: 6px;
+  color: #fff;
+  padding: 5px 8px;
+  font-size: 12px;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.datepicker-actions {
+  display: flex;
+  gap: 6px;
+  justify-content: flex-end;
+}
+
+.datepicker-apply-btn {
+  padding: 4px 14px;
+  border-radius: 6px;
+  border: none;
+  background: #3a7bd5;
+  color: #fff;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.datepicker-clear-btn {
+  padding: 4px 14px;
+  border-radius: 6px;
+  border: 1px solid #555;
+  background: transparent;
+  color: #aaa;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+@media (max-width: 768px) {
+  .datepicker-popup {
+    right: auto;
+    left: 0;
+    min-width: 200px;
   }
 }

@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef } from 'react';
 import { createPortal } from 'react-dom';
 
 interface RangeSelection {
@@ -27,21 +27,6 @@ export default function RangeQueryPopup({ range, chartRect, onAsk, onClose }: Pr
   const popupRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  // Close on click outside
-  useEffect(() => {
-    function handleClick(e: MouseEvent) {
-      if (popupRef.current && !popupRef.current.contains(e.target as Node)) {
-        onClose();
-      }
-    }
-    // Delay to avoid the brush mouseup from closing immediately
-    const timer = setTimeout(() => document.addEventListener('mousedown', handleClick), 100);
-    return () => {
-      clearTimeout(timer);
-      document.removeEventListener('mousedown', handleClick);
-    };
-  }, [onClose]);
-
   const change = range.priceChange ?? 0;
   const isUp = change >= 0;
 
@@ -64,9 +49,10 @@ export default function RangeQueryPopup({ range, chartRect, onAsk, onClose }: Pr
         <span className={`range-popup-change ${isUp ? 'up' : 'down'}`}>
           {isUp ? '+' : ''}{change.toFixed(2)}%
         </span>
+        <button className="range-popup-close" onClick={onClose}>✕</button>
       </div>
 
-      <div className="range-popup-label">Ask PokieTicker</div>
+      <div className="range-popup-label">Ask AI</div>
 
       {PRESET_QUESTIONS.map((q) => (
         <button

@@ -1,0 +1,10 @@
+analysis_id,code,created_at,score,status,detail
+80,AAPL,2026-03-23 23:40:48.177788,58,waiting_future_data,"Have 1 trading rows from 2026-03-23 to 2026-03-23, need 6"
+81,AAPL,2026-03-23 23:52:30.448702,68,waiting_future_data,"Have 1 trading rows from 2026-03-23 to 2026-03-23, need 6"
+82,AAPL,2026-03-23 23:57:03.394524,62,waiting_future_data,"Have 1 trading rows from 2026-03-23 to 2026-03-23, need 6"
+83,AAPL,2026-03-23 23:58:52.411623,62,waiting_future_data,"Have 1 trading rows from 2026-03-23 to 2026-03-23, need 6"
+84,AAPL,2026-03-24 00:02:08.701571,58,missing_price_series,No price rows on or after 2026-03-24
+85,AAPL,2026-03-24 00:03:48.455615,62,missing_price_series,No price rows on or after 2026-03-24
+86,AAPL,2026-03-24 00:35:40.217799,58,missing_price_series,No price rows on or after 2026-03-24
+87,NVDA,2026-03-24 00:37:38.100565,62,missing_price_series,No price rows on or after 2026-03-24
+88,AMZN,2026-03-24 00:38:17.292073,59,missing_price_series,No price rows on or after 2026-03-24

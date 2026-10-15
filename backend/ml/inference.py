@@ -1,11 +1,4 @@
-"""Forecast module: aggregate recent news window → predict future trend.
-
-Combines:
-1. Recent news aggregation (7d or 30d window)
-2. XGBoost model prediction
-3. Similar historical period search
-4. Statistical conclusion generation
-"""
+"""Forecast module: 1D / 7D / 14D market-state forecast."""
 
 import json
 from pathlib import Path
@@ -17,6 +10,15 @@ import joblib
 
 from backend.database import get_conn
 from backend.ml.features import build_features, FEATURE_COLS
+from backend.ml.features_v2 import build_features_v2, FEATURE_COLS_V2_MARKET, FEATURE_COLS_V2_CANDLE
+from backend.ml.model import DETAIL_HORIZON_CONFIG
+from backend.ml.similar import compute_similar_day_bundle
+
+INFERENCE_FEATURE_SETS = {
+    "v1_base": FEATURE_COLS,
+    "v2_market": FEATURE_COLS_V2_MARKET,
+    "v2_candle": FEATURE_COLS_V2_CANDLE,
+}
 
 MODELS_DIR = Path(__file__).parent / "models"
 
@@ -43,13 +45,13 @@ def _load_recent_news(symbol: str, window_days: int, ref_date: str | None = None
         """SELECT na.news_id, na.trade_date, nr.title,
                   l1.sentiment, l1.chinese_summary,
                   l1.relevance, l1.key_discussion,
-                  na.ret_t0, na.ret_t1
+                  na.ret_t0, na.ret_t1,
+                  nr.article_url
            FROM news_aligned na
            JOIN news_raw nr ON na.news_id = nr.id
            LEFT JOIN layer1_results l1 ON na.news_id = l1.news_id AND l1.symbol = na.symbol
            WHERE na.symbol = ? AND na.trade_date >= ? AND na.trade_date <= ?
-           ORDER BY na.trade_date DESC
-           LIMIT 200""",
+           ORDER BY na.trade_date DESC""",
         (symbol, cutoff, ref_date),
     ).fetchall()
     conn.close()
@@ -57,35 +59,69 @@ def _load_recent_news(symbol: str, window_days: int, ref_date: str | None = None
 
 
 def _compute_window_features(df: pd.DataFrame, window_days: int) -> np.ndarray | None:
-    """Average the feature vectors over the last `window_days` trading days."""
+    """Build a compact state vector for the latest 1D / 7D / 14D horizon."""
     if df.empty:
         return None
-    # Take last N rows (trading days, not calendar days)
+    if window_days <= 1:
+        vec = df.iloc[-1][FEATURE_COLS].values.astype(np.float64)
+        np.nan_to_num(vec, copy=False)
+        return vec
+
     n_rows = min(window_days, len(df))
     window_df = df.iloc[-n_rows:]
-    vec = window_df[FEATURE_COLS].mean().values.astype(np.float64)
+    last_row = window_df.iloc[-1]
+
+    vec = np.array([
+        float(window_df["sentiment_score"].mean()),
+        float(window_df["n_relevant"].sum()),
+        float(window_df["positive_ratio"].mean()),
+        float(window_df["negative_ratio"].mean()),
+        float(window_df["sentiment_momentum_3d"].iloc[-1]),
+        float(last_row["ret_1d"]),
+        float(last_row["ret_5d"]),
+        float(((last_row["close"] / window_df.iloc[0]["close"]) - 1) if window_df.iloc[0]["close"] else 0.0),
+        float(window_df["volatility_5d"].mean()),
+        float(last_row["ma5_vs_ma20"]),
+        float(last_row["rsi_14"]),
+    ], dtype=np.float64)
     np.nan_to_num(vec, copy=False)
     return vec
 
 
 def _find_similar_periods(
-    df: pd.DataFrame, window_vec: np.ndarray, window_days: int, top_k: int = 10
+    df: pd.DataFrame, window_vec: np.ndarray, window_days: int, horizon_days: int, top_k: int = 10
 ) -> list[dict]:
-    """Slide a window over history, compute average feature vector for each
-    position, then find the most similar windows to the current one."""
+    """Compare the current 1D / 7D / 14D state to historical states."""
     n = len(df)
-    if n < window_days + 10:
+    if n < window_days + horizon_days + 10:
         return []
 
-    # Build sliding window averages
-    X_raw = df[FEATURE_COLS].values.astype(np.float64)
-    np.nan_to_num(X_raw, copy=False)
-
-    # Compute rolling mean for each feature using cumsum for efficiency
-    cumsum = np.vstack([np.zeros((1, X_raw.shape[1])), np.cumsum(X_raw, axis=0)])
-    # window_vecs[i] = mean of rows [i, i+window_days)
-    max_start = n - window_days
-    window_vecs = (cumsum[window_days:n + 1] - cumsum[:max_start + 1]) / window_days
+    state_vecs = []
+    dates = df["trade_date"].dt.strftime("%Y-%m-%d").tolist()
+    max_start = n - window_days + 1
+    for start in range(max_start):
+        end = start + window_days
+        window_df = df.iloc[start:end]
+        last_row = window_df.iloc[-1]
+        if window_days <= 1:
+            vec = window_df.iloc[-1][FEATURE_COLS].values.astype(np.float64)
+        else:
+            vec = np.array([
+                float(window_df["sentiment_score"].mean()),
+                float(window_df["n_relevant"].sum()),
+                float(window_df["positive_ratio"].mean()),
+                float(window_df["negative_ratio"].mean()),
+                float(window_df["sentiment_momentum_3d"].iloc[-1]),
+                float(last_row["ret_1d"]),
+                float(last_row["ret_5d"]),
+                float(((last_row["close"] / window_df.iloc[0]["close"]) - 1) if window_df.iloc[0]["close"] else 0.0),
+                float(window_df["volatility_5d"].mean()),
+                float(last_row["ma5_vs_ma20"]),
+                float(last_row["rsi_14"]),
+            ], dtype=np.float64)
+        np.nan_to_num(vec, copy=False)
+        state_vecs.append(vec)
+    window_vecs = np.vstack(state_vecs)
 
     # Normalize all vectors (including the target)
     all_vecs = np.vstack([window_vecs, window_vec.reshape(1, -1)])
@@ -105,16 +141,12 @@ def _find_similar_periods(
         target_n = 1.0
     sims = history_norm @ target_norm / (norms * target_n)
 
-    # Exclude windows that overlap with the current period (last window_days*2 rows)
-    exclude_start = max(0, len(sims) - window_days * 2)
+    # Exclude windows that overlap with the current period.
+    exclude_start = max(0, len(sims) - window_days - 5)
     sims[exclude_start:] = -999
 
     # Top K
     top_indices = np.argsort(sims)[::-1][:top_k]
-
-    # Get forward returns after each historical window
-    conn = get_conn()
-    dates = df["trade_date"].dt.strftime("%Y-%m-%d").tolist()
 
     results = []
     for idx in top_indices:
@@ -122,10 +154,8 @@ def _find_similar_periods(
             continue
         period_start = dates[idx]
         period_end = dates[min(idx + window_days - 1, n - 1)]
-        # Forward return: price change in the window_days after this period
         after_start = idx + window_days
-        after_end_t5 = min(after_start + 5, n)
-        after_end_t10 = min(after_start + 10, n)
+        after_end = min(after_start + horizon_days, n)
 
         if after_start >= n:
             continue
@@ -133,14 +163,10 @@ def _find_similar_periods(
         close_vals = df["close"].values
         period_close = close_vals[min(idx + window_days - 1, n - 1)]
 
-        ret_t5 = None
-        ret_t10 = None
-        if after_end_t5 > after_start:
-            ret_t5 = round((close_vals[after_end_t5 - 1] / period_close - 1) * 100, 2)
-        if after_end_t10 > after_start:
-            ret_t10 = round((close_vals[after_end_t10 - 1] / period_close - 1) * 100, 2)
+        ret_after_horizon = None
+        if after_end > after_start:
+            ret_after_horizon = round((close_vals[after_end - 1] / period_close - 1) * 100, 2)
 
-        # Sentiment in that historical window
         window_slice = df.iloc[idx:idx + window_days]
         avg_sentiment = float(window_slice["sentiment_score"].mean())
 
@@ -149,70 +175,91 @@ def _find_similar_periods(
             "period_end": period_end,
             "similarity": round(float(sims[idx]), 4),
             "avg_sentiment": round(avg_sentiment, 3),
-            "n_articles": int(window_slice["n_articles"].sum()),
-            "ret_after_5d": ret_t5,
-            "ret_after_10d": ret_t10,
+            "n_relevant": int(window_slice["n_relevant"].sum()),
+            "ret_after_horizon": ret_after_horizon,
         })
-
-    conn.close()
     return results
 
 
-def generate_forecast(symbol: str, window_days: int = 7) -> dict:
+def generate_forecast(symbol: str, window_days: int = 7, ref_date: str | None = None) -> dict:
     """Generate a complete forecast report for a symbol.
 
     Args:
         symbol: Ticker symbol
-        window_days: Look-back window (7 or 30)
+        window_days: Horizon-aligned look-back window (1, 7, or 14)
 
     Returns:
         Complete forecast with prediction, similar periods, recent news, conclusion.
     """
     symbol = symbol.upper()
-    df = build_features(symbol)
+    df = build_features_v2(symbol, use_text=False)
     if df.empty:
         return {"error": f"No feature data for {symbol}"}
+
+    if ref_date:
+        cutoff = pd.to_datetime(ref_date).normalize()
+        df = df[df["trade_date"] <= cutoff].copy()
+        if df.empty:
+            return {"error": f"No feature data for {symbol} on or before {ref_date}"}
 
     # Use last available trade date as reference (not today's date)
     last_date = df.iloc[-1]["trade_date"].strftime("%Y-%m-%d")
 
+    if window_days not in {1, 7, 14}:
+        return {"error": "window must be one of 1, 7, 14"}
+
+    horizon_key = f"t{window_days}"
+
     # 1. Recent news
     recent_news = _load_recent_news(symbol, window_days, ref_date=last_date)
-    n_pos = sum(1 for n in recent_news if n.get("sentiment") == "positive")
-    n_neg = sum(1 for n in recent_news if n.get("sentiment") == "negative")
-    n_neu = sum(1 for n in recent_news if n.get("sentiment") == "neutral")
-    n_total = len(recent_news)
+    relevant_news = [
+        n for n in recent_news
+        if n.get("relevance") in {"relevant", "high", "medium"}
+    ]
+    n_pos = sum(1 for n in relevant_news if n.get("sentiment") == "positive")
+    n_neg = sum(1 for n in relevant_news if n.get("sentiment") == "negative")
+    n_neu = sum(1 for n in relevant_news if n.get("sentiment") == "neutral")
+    n_total = len(relevant_news)
 
-    # Score articles by composite: relevance + sentiment strength + price move
+    # Match sentiment to price direction: up day → positive news, down day → negative news
     def _impact_score(n):
         score = 0.0
-        # Relevant articles score higher
+        ret = n.get("ret_t0")
+        sent = n.get("sentiment")
+        # Sentiment matches price direction → high score
+        if ret is not None and sent is not None:
+            if ret > 0 and sent == "positive":
+                score += 3.0
+            elif ret < 0 and sent == "negative":
+                score += 3.0
+            elif sent == "neutral":
+                score += 0.3
+            else:
+                score += 0.5  # mismatched sentiment/direction
+        # Relevance boost
         if n.get("relevance") == "relevant":
             score += 2.0
-        # Non-neutral sentiment scores higher
-        sent = n.get("sentiment")
-        if sent in ("positive", "negative"):
-            score += 1.5
-        elif sent == "neutral":
-            score += 0.3
-        # else (None) → 0
-        # Price move magnitude
-        if n.get("ret_t0") is not None:
-            score += min(abs(n["ret_t0"]) * 10, 2.0)  # cap at 2.0
         return score
 
-    impact_candidates = [
-        n for n in recent_news
-        if n.get("sentiment") in ("positive", "negative")  # exclude neutral/None
-        and n.get("ret_t0") is not None
+    # Per day: only output if there's a sentiment-direction match, pick highest relevance
+    from collections import defaultdict
+    daily_candidates = defaultdict(list)
+    for n in recent_news:
+        ret = n.get("ret_t0")
+        sent = n.get("sentiment")
+        if ret is None or sent is None:
+            continue
+        # Only keep articles where sentiment matches price direction
+        if (ret > 0 and sent == "positive") or (ret < 0 and sent == "negative"):
+            daily_candidates[n["trade_date"]].append(n)
+
+    def _relevance_score(n):
+        return 1 if n.get("relevance") == "relevant" else 0
+
+    impact_sorted = [
+        max(articles, key=_relevance_score)
+        for date, articles in sorted(daily_candidates.items(), reverse=True)
     ]
-    # Fallback: if too few strong-sentiment articles, include neutral ones too
-    if len(impact_candidates) < 5:
-        impact_candidates = [
-            n for n in recent_news
-            if n.get("sentiment") is not None and n.get("ret_t0") is not None
-        ]
-    impact_sorted = sorted(impact_candidates, key=_impact_score, reverse=True)
 
     news_summary = {
         "total": n_total,
@@ -228,7 +275,7 @@ def generate_forecast(symbol: str, window_days: int = 7) -> dict:
                 "sentiment": n.get("sentiment", "unknown"),
                 "summary": (n.get("chinese_summary") or "")[:120],
             }
-            for n in recent_news[:10]
+            for n in relevant_news[:10]
         ],
         # Most impactful articles (by price move magnitude)
         "top_impact": [
@@ -241,8 +288,9 @@ def generate_forecast(symbol: str, window_days: int = 7) -> dict:
                 "key_discussion": (n.get("key_discussion") or "")[:150],
                 "ret_t0": round(n["ret_t0"] * 100, 2) if n.get("ret_t0") else None,
                 "ret_t1": round(n["ret_t1"] * 100, 2) if n.get("ret_t1") else None,
+                "article_url": n.get("article_url"),
             }
-            for n in impact_sorted[:5]
+            for n in impact_sorted[:window_days]
         ],
     }
 
@@ -273,8 +321,8 @@ def generate_forecast(symbol: str, window_days: int = 7) -> dict:
             "baseline_accuracy": None,
         }
 
-    # 3b. XGBoost predictions for t1/t5
-    for horizon in ["t1", "t5"]:
+    # 3b. XGBoost predictions for t1/t7/t14
+    for horizon in ["t1", "t7", "t14"]:
         model_path = MODELS_DIR / f"{symbol}_{horizon}.joblib"
         meta_path = MODELS_DIR / f"{symbol}_{horizon}_meta.json"
         if not model_path.exists():
@@ -282,9 +330,11 @@ def generate_forecast(symbol: str, window_days: int = 7) -> dict:
 
         model = joblib.load(model_path)
         meta = json.loads(meta_path.read_text())
+        feature_set = meta.get("feature_set", "v1_base")
+        feature_cols = [c for c in INFERENCE_FEATURE_SETS.get(feature_set, FEATURE_COLS) if c in df.columns]
 
         last_row = df.iloc[-1]
-        X = last_row[FEATURE_COLS].values.reshape(1, -1).astype(np.float64)
+        X = last_row[feature_cols].values.reshape(1, -1).astype(np.float64)
         np.nan_to_num(X, copy=False)
 
         proba = model.predict_proba(X)[0]
@@ -294,10 +344,26 @@ def generate_forecast(symbol: str, window_days: int = 7) -> dict:
         # Instance-level feature contribution (deviation from training mean)
         feature_means = df[FEATURE_COLS].mean()
         feature_stds = df[FEATURE_COLS].std().clip(lower=1e-10)
-        importances = model.feature_importances_
+        if hasattr(model, "feature_importances_"):
+            importances = np.asarray(model.feature_importances_, dtype=float)
+        elif hasattr(model, "named_steps"):
+            clf = model.named_steps["clf"]
+            if hasattr(clf, "feature_importances_"):
+                importances = np.asarray(clf.feature_importances_, dtype=float)
+            elif hasattr(clf, "coef_"):
+                coef = np.asarray(clf.coef_)
+                if coef.ndim == 2:
+                    coef = coef[0]
+                importances = np.abs(coef)
+            else:
+                importances = np.zeros(len(feature_cols), dtype=float)
+        else:
+            importances = np.zeros(len(feature_cols), dtype=float)
 
         contributions = []
-        for i, col in enumerate(FEATURE_COLS):
+        feature_means = df[feature_cols].mean()
+        feature_stds = df[feature_cols].std().clip(lower=1e-10)
+        for i, col in enumerate(feature_cols):
             val = float(last_row[col]) if pd.notna(last_row[col]) else 0.0
             z = (val - feature_means[col]) / feature_stds[col]
             contrib = abs(z) * importances[i]
@@ -315,29 +381,49 @@ def generate_forecast(symbol: str, window_days: int = 7) -> dict:
         prediction[horizon] = {
             "direction": "up" if pred_class == 1 else "down",
             "confidence": round(confidence, 4),
-            "model_type": "XGBoost",
+            "model_type": meta.get("selected_family", meta.get("model_type", "model")).upper(),
             "top_drivers": contributions[:6],
             "model_accuracy": meta.get("accuracy", 0),
             "baseline_accuracy": meta.get("baseline", 0),
+            "feature_set": meta.get("feature_set"),
         }
 
     if prediction is None:
         return {"error": f"No trained model for {symbol}"}
 
-    # 4. Similar historical periods
-    similar_periods = _find_similar_periods(df, window_vec, window_days, top_k=10)
-
-    # Stats from similar periods
-    rets_5 = [p["ret_after_5d"] for p in similar_periods if p["ret_after_5d"] is not None]
-    rets_10 = [p["ret_after_10d"] for p in similar_periods if p["ret_after_10d"] is not None]
-
-    similar_stats = {
-        "count": len(similar_periods),
-        "up_ratio_5d": round(sum(1 for r in rets_5 if r > 0) / max(len(rets_5), 1), 2),
-        "up_ratio_10d": round(sum(1 for r in rets_10 if r > 0) / max(len(rets_10), 1), 2),
-        "avg_ret_5d": round(float(np.mean(rets_5)), 2) if rets_5 else None,
-        "avg_ret_10d": round(float(np.mean(rets_10)), 2) if rets_10 else None,
-    }
+    # 4. Similar historical days using the same single-day method as the Similar Days panel
+    similar_bundle = compute_similar_day_bundle(symbol, last_date, top_k=10, horizon_days=window_days)
+    if "error" in similar_bundle:
+        similar_periods = []
+        similar_stats = {
+            "count": 0,
+            "horizon_days": window_days,
+            "up_ratio": None,
+            "avg_ret": None,
+            "weighted_up_ratio": None,
+            "weighted_avg_ret": None,
+        }
+    else:
+        similar_periods = [
+            {
+                "period_start": day["date"],
+                "period_end": day["date"],
+                "similarity": day["similarity"],
+                "avg_sentiment": day["sentiment_score"],
+                "n_relevant": day["n_relevant"],
+                "ret_after_horizon": day["ret_after_horizon"],
+            }
+            for day in similar_bundle["similar_days"]
+        ]
+        stats_h = similar_bundle["stats"]
+        similar_stats = {
+            "count": stats_h["count"],
+            "horizon_days": window_days,
+            "up_ratio": stats_h["up_ratio_h"],
+            "avg_ret": stats_h["avg_ret_h"],
+            "weighted_up_ratio": stats_h["weighted_up_ratio_h"],
+            "weighted_avg_ret": stats_h["weighted_avg_ret_h"],
+        }
 
     # 5. Generate conclusion (pure statistics, no AI API)
     conclusion = _build_conclusion(
@@ -349,6 +435,7 @@ def generate_forecast(symbol: str, window_days: int = 7) -> dict:
     return {
         "symbol": symbol,
         "window_days": window_days,
+        "horizon_key": horizon_key,
         "forecast_date": last_date,
         "news_summary": news_summary,
         "prediction": prediction,
@@ -368,7 +455,7 @@ def _build_conclusion(
     """Build an English-language conclusion from statistical signals."""
     parts = []
 
-    window_label = f"past {window_days} days" if window_days <= 7 else f"past {window_days} days (~1 month)"
+    window_label = f"past {window_days} trading day" if window_days == 1 else f"past {window_days} trading days"
     n = news_summary["total"]
     ratio = news_summary["sentiment_ratio"]
 
@@ -385,7 +472,7 @@ def _build_conclusion(
 
     # Model prediction
     horizon_labels = [
-        ("Short-term (T+1)", "t1"), ("Mid-term (T+3)", "t3"), ("Mid-term (T+5)", "t5"),
+        ("1D", "t1"), ("7D", "t7"), ("14D", "t14"),
     ]
     for h_label, h_key in horizon_labels:
         p = prediction.get(h_key)
@@ -398,28 +485,26 @@ def _build_conclusion(
 
     # Similar periods
     if similar_stats["count"] > 0:
-        ur5 = similar_stats.get("up_ratio_5d")
-        ar5 = similar_stats.get("avg_ret_5d")
-        if ur5 is not None and ar5 is not None:
+        ur = similar_stats.get("weighted_up_ratio") or similar_stats.get("up_ratio")
+        ar = similar_stats.get("weighted_avg_ret") or similar_stats.get("avg_ret")
+        if ur is not None and ar is not None:
             parts.append(
                 f"Among {similar_stats['count']} historically similar periods, "
-                f"{ur5*100:.0f}% rose in the following 5 days, "
-                f"with an average return of {ar5:+.1f}%."
+                f"{ur*100:.0f}% rose over the following {window_days} trading days, "
+                f"with an average return of {ar:+.1f}%."
             )
 
     # Overall judgment
     signals = []
-    t1 = prediction.get("t1", {})
-    if t1:
-        signals.append(1 if t1["direction"] == "up" else -1)
-    t3 = prediction.get("t3", {})
-    if t3:
-        signals.append(1 if t3["direction"] == "up" else -1)
-    t5 = prediction.get("t5", {})
-    if t5:
-        signals.append(1 if t5["direction"] == "up" else -1)
-    if similar_stats.get("up_ratio_5d") is not None:
-        signals.append(1 if similar_stats["up_ratio_5d"] > 0.5 else -1)
+    for h in ("t1", "t7", "t14"):
+        p = prediction.get(h, {})
+        if p:
+            signals.append(1 if p["direction"] == "up" else -1)
+    similarity_signal = similar_stats.get("weighted_up_ratio")
+    if similarity_signal is None:
+        similarity_signal = similar_stats.get("up_ratio")
+    if similarity_signal is not None:
+        signals.append(1 if similarity_signal > 0.5 else -1)
     if ratio > 0.1:
         signals.append(1)
     elif ratio < -0.1:

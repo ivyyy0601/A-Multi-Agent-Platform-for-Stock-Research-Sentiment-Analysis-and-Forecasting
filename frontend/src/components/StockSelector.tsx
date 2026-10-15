@@ -26,7 +26,7 @@ const GROUPS: Record<string, string[]> = {
   'Health': ['UNH', 'JNJ', 'LLY', 'MRNA', 'NVO'],
   'Energy': ['XOM', 'CVX', 'OXY', 'XLE', 'USO'],
   'Telecom': ['T', 'VZ'],
-  'Other': ['BA', 'UBER', 'GME', 'AMC', 'MULN', 'SQ', 'FB', 'AMJB', 'GLD', 'XLU', 'XLY', 'DIDI'],
+  'Other': ['BA', 'UBER', 'GME', 'AMC', 'SQ', 'AMJB', 'GLD', 'XLU', 'XLY'],
 };
 
 export default function StockSelector({ activeTickers, selectedSymbol, onSelect, onAdd }: Props) {

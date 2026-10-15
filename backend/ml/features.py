@@ -12,10 +12,10 @@ def _load_news_features(symbol: str) -> pd.DataFrame:
         """
         SELECT na.trade_date,
                COUNT(*)                                          AS n_articles,
-               SUM(CASE WHEN l1.relevance IN ('high','medium') THEN 1 ELSE 0 END) AS n_relevant,
-               SUM(CASE WHEN l1.sentiment = 'positive' THEN 1 ELSE 0 END) AS n_positive,
-               SUM(CASE WHEN l1.sentiment = 'negative' THEN 1 ELSE 0 END) AS n_negative,
-               SUM(CASE WHEN l1.sentiment = 'neutral'  THEN 1 ELSE 0 END) AS n_neutral
+               SUM(CASE WHEN l1.relevance IN ('relevant','high','medium') THEN 1 ELSE 0 END) AS n_relevant,
+               SUM(CASE WHEN l1.relevance IN ('relevant','high','medium') AND l1.sentiment = 'positive' THEN 1 ELSE 0 END) AS n_positive,
+               SUM(CASE WHEN l1.relevance IN ('relevant','high','medium') AND l1.sentiment = 'negative' THEN 1 ELSE 0 END) AS n_negative,
+               SUM(CASE WHEN l1.relevance IN ('relevant','high','medium') AND l1.sentiment = 'neutral'  THEN 1 ELSE 0 END) AS n_neutral
         FROM news_aligned na
         JOIN layer1_results l1 ON na.news_id = l1.news_id AND na.symbol = l1.symbol
         WHERE na.symbol = ?
@@ -32,10 +32,11 @@ def _load_news_features(symbol: str) -> pd.DataFrame:
     df = pd.DataFrame([dict(r) for r in rows])
     df["trade_date"] = pd.to_datetime(df["trade_date"])
     total = df["n_articles"].clip(lower=1)
-    df["sentiment_score"] = (df["n_positive"] - df["n_negative"]) / total
+    relevant_total = df["n_relevant"].clip(lower=1)
+    df["sentiment_score"] = (df["n_positive"] - df["n_negative"]) / relevant_total
     df["relevance_ratio"] = df["n_relevant"] / total
-    df["positive_ratio"] = df["n_positive"] / total
-    df["negative_ratio"] = df["n_negative"] / total
+    df["positive_ratio"] = df["n_positive"] / relevant_total
+    df["negative_ratio"] = df["n_negative"] / relevant_total
     df["has_news"] = 1
     return df
 
@@ -122,6 +123,8 @@ def build_features(symbol: str) -> pd.DataFrame:
     df["target_t2"] = (close.shift(-2) > close).astype(int)
     df["target_t3"] = (close.shift(-3) > close).astype(int)
     df["target_t5"] = (close.shift(-5) > close).astype(int)
+    df["target_t7"] = (close.shift(-7) > close).astype(int)
+    df["target_t14"] = (close.shift(-14) > close).astype(int)
 
     # Drop rows without enough history
     df = df.dropna(subset=["ret_10d", "rsi_14"]).reset_index(drop=True)

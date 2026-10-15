@@ -1,0 +1,45 @@
+name: earnings_analysis
+display_name: Earnings Analysis
+description: Structured analysis around earnings events. Use when a stock has a recent or upcoming earnings report, or when the user asks about quarterly results.
+category: framework
+core_rules: [2, 5]
+required_tools:
+  - get_iv_news
+  - get_iv_forecast
+  - get_iv_similar_days
+  - get_iv_library
+  - get_iv_rag_search
+
+instructions: |
+  **Earnings Analysis Framework**
+
+  Use this skill when analyzing a stock around an earnings event (beat/miss/upcoming).
+
+  ## Step 1 — Retrieve Context
+  - Call `get_iv_news(symbol)` to get recent news. Look for earnings-related articles.
+  - Call `get_iv_library(query="earnings", symbol=symbol)` to find any past earnings notes.
+  - Call `get_iv_similar_days(symbol)` to see how the stock behaved after similar past events.
+
+  ## Step 2 — Assess the Earnings Result
+  Identify from news:
+  - **EPS**: Beat / In-line / Miss vs. consensus
+  - **Revenue**: Beat / In-line / Miss
+  - **Guidance**: Raised / Maintained / Lowered / Not provided
+  - **Key metric**: (depends on sector — e.g. margins for tech, same-store sales for retail)
+
+  ## Step 3 — Evaluate Market Reaction
+  - Check `ret_t1` (next-day return) in news articles around the earnings date.
+  - If beat but stock dropped: look for guidance cut, margin compression, or valuation concern.
+  - If miss but stock rose: look for better-than-feared guidance or sentiment shift.
+
+  ## Step 4 — Forward Outlook
+  - Call `get_iv_forecast(symbol, horizon="7")` for the week-ahead ML signal.
+  - Note if ML direction aligns with fundamental earnings surprise direction.
+
+  ## Output Format
+  Structure your response as:
+  1. **Earnings Summary** — EPS/Revenue vs. consensus, one sentence each
+  2. **Guidance** — what management said about next quarter
+  3. **Market Reaction** — actual price move and why
+  4. **Key Risks** — 2-3 bullet points
+  5. **Signal** — Bullish / Neutral / Bearish with one-line rationale
