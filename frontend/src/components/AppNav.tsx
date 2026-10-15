@@ -2,8 +2,8 @@ import { useEffect, useState } from 'react';
 import axios from 'axios';
 
 interface AppNavProps {
-  activeView: 'ticker' | 'analysis' | 'adanos' | 'social' | 'team' | 'automation' | 'overall';
-  onChangeView: (view: 'ticker' | 'analysis' | 'adanos' | 'social' | 'team' | 'automation' | 'overall') => void;
+  activeView: 'ticker' | 'analysis' | 'adanos' | 'team' | 'automation' | 'overall';
+  onChangeView: (view: 'ticker' | 'analysis' | 'adanos' | 'team' | 'automation' | 'overall') => void;
 }
 
 export default function AppNav({ activeView, onChangeView }: AppNavProps) {

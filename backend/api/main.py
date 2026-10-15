@@ -14,7 +14,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from backend.database import init_db
-from backend.api.routers import stocks, news, analysis, predict, adanos, automation, market, ai, library
+from backend.api.routers import stocks, news, analysis, predict, automation, market, ai, library
 
 app = FastAPI(title="PokieTicker", version="1.0.0")
 
@@ -30,7 +30,6 @@ app.include_router(stocks.router, prefix="/api/stocks", tags=["stocks"])
 app.include_router(news.router, prefix="/api/news", tags=["news"])
 app.include_router(analysis.router, prefix="/api/analysis", tags=["analysis"])
 app.include_router(predict.router, prefix="/api/predict", tags=["predict"])
-app.include_router(adanos.router, prefix="/api/adanos", tags=["adanos"])
 app.include_router(automation.router, prefix="/api/automation", tags=["automation"])
 app.include_router(market.router, prefix="/api/market", tags=["market"])
 app.include_router(ai.router,      prefix="/api/ai",      tags=["ai"])

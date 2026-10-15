@@ -76,15 +76,10 @@ exit(0 if job and job['status'] == 'collected' else 1)
     "$MAIN_PYTHON" -m backend.ml.train >> "$LOG_FILE" 2>&1
     echo "[ML] Training complete." >> "$LOG_FILE"
 
-    echo "[ML] Retraining adanos social model..." >> "$LOG_FILE"
-    "$MAIN_PYTHON" -m backend.automation.status update --run-id "$RUN_ID" --step train_social --message "Training social model" >/dev/null
-    "$MAIN_PYTHON" -m backend.adanos.model >> "$LOG_FILE" 2>&1
-    echo "[ML] Adanos model complete." >> "$LOG_FILE"
-
-    echo "[ML] Generating cached adanos forecasts..." >> "$LOG_FILE"
-    "$MAIN_PYTHON" -m backend.automation.status update --run-id "$RUN_ID" --step cache_social_forecast --message "Caching social forecasts" >/dev/null
-    "$MAIN_PYTHON" -m backend.adanos.daily_forecast >> "$LOG_FILE" 2>&1
-    echo "[ML] Adanos forecast cache complete." >> "$LOG_FILE"
+    echo "[ML] Generating cached detail forecasts..." >> "$LOG_FILE"
+    "$MAIN_PYTHON" -m backend.automation.status update --run-id "$RUN_ID" --step cache_detail_forecast --message "Caching detail forecasts" >/dev/null
+    "$MAIN_PYTHON" -m backend.ml.daily_forecast >> "$LOG_FILE" 2>&1
+    echo "[ML] Detail forecast cache complete." >> "$LOG_FILE"
     "$MAIN_PYTHON" -m backend.automation.status finish --run-id "$RUN_ID" --message "Batch collect and model training completed" >/dev/null
 else
     echo "[ML] Skipping training — batch not yet collected." >> "$LOG_FILE"

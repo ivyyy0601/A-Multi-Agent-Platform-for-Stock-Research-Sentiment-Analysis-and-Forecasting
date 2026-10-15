@@ -40,11 +40,11 @@ LOG_FILE="$LOG_DIR/daily_$(date +%Y%m%d).log"
 echo "=== $(date) ===" >> "$LOG_FILE"
 RUN_ID=$("$MAIN_PYTHON" -m backend.automation.status start --pipeline daily_update --step start --message "Daily update started")
 
-echo "[1/3] Fetching latest data..." >> "$LOG_FILE"
+echo "[1/2] Fetching latest data..." >> "$LOG_FILE"
 "$MAIN_PYTHON" -m backend.automation.status update --run-id "$RUN_ID" --step fetch_recent --message "Fetching latest OHLC and news" >/dev/null
 "$MAIN_PYTHON" -m backend.update_recent --days 2 >> "$LOG_FILE" 2>&1
 
-echo "[1.5/3] Verifying latest OHLC coverage and retrying missing tickers..." >> "$LOG_FILE"
+echo "[1.5/2] Verifying latest OHLC coverage and retrying missing tickers..." >> "$LOG_FILE"
 "$MAIN_PYTHON" -m backend.automation.status update --run-id "$RUN_ID" --step ensure_ohlc --message "Verifying OHLC coverage" >/dev/null
 "$MAIN_PYTHON" -m backend.ensure_recent_ohlc >> "$LOG_FILE" 2>&1
 
@@ -64,7 +64,7 @@ PYEOF
 TARGET_DATE=$(echo "$COVERAGE_INFO" | cut -d'|' -f1)
 TRACKED_COUNT=$(echo "$COVERAGE_INFO" | cut -d'|' -f2)
 COVERED_COUNT=$(echo "$COVERAGE_INFO" | cut -d'|' -f3)
-echo "[1.6/3] OHLC coverage for ${TARGET_DATE}: ${COVERED_COUNT}/${TRACKED_COUNT} (threshold ${MIN_OHLC_COVERAGE})" >> "$LOG_FILE"
+echo "[1.6/2] OHLC coverage for ${TARGET_DATE}: ${COVERED_COUNT}/${TRACKED_COUNT} (threshold ${MIN_OHLC_COVERAGE})" >> "$LOG_FILE"
 "$MAIN_PYTHON" -m backend.automation.status update \
   --run-id "$RUN_ID" \
   --step ensure_ohlc \
@@ -80,24 +80,7 @@ if [ "$COVERED_COUNT" -lt "$MIN_OHLC_COVERAGE" ]; then
   exit 1
 fi
 
-echo "[2/3] Fetching adanos sentiment (reddit/twitter/news) for all tickers..." >> "$LOG_FILE"
-"$MAIN_PYTHON" -m backend.automation.status update --run-id "$RUN_ID" --step backfill_social --message "Backfilling social sentiment" >/dev/null
-"$MAIN_PYTHON" - >> "$LOG_FILE" 2>&1 <<'PYEOF'
-from backend.database import get_conn, init_db
-from backend.adanos.backfill import backfill_ticker
-init_db()
-conn = get_conn()
-tickers = [r['ticker'] for r in conn.execute(
-    'SELECT DISTINCT ticker FROM platform_sentiment ORDER BY ticker'
-).fetchall()]
-conn.close()
-print(f'Backfilling {len(tickers)} tickers...')
-for t in tickers:
-    backfill_ticker(t, days=2)
-print('Done.')
-PYEOF
-
-echo "[3/3] Submitting to Anthropic Batch API..." >> "$LOG_FILE"
+echo "[2/2] Submitting to Anthropic Batch API..." >> "$LOG_FILE"
 "$MAIN_PYTHON" -m backend.automation.status update --run-id "$RUN_ID" --step submit_batch --message "Submitting Anthropic batch" >/dev/null
 "$MAIN_PYTHON" -m backend.batch_submit >> "$LOG_FILE" 2>&1
 
