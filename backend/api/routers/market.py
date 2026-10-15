@@ -972,27 +972,263 @@ def get_screener(
     if beta_min:   kwargs["beta_min"]   = beta_min
     if beta_max:   kwargs["beta_max"]   = beta_max
     rows = _call(lambda: _obb().equity.screener(**kwargs))
-    return rows
+    return rows or _screener_from_yf(
+        sector=sector, mktcap_min=mktcap_min, mktcap_max=mktcap_max,
+        price_min=price_min, price_max=price_max, volume_min=volume_min,
+        beta_min=beta_min, beta_max=beta_max, limit=limit,
+    )
+
+
+# Yahoo's sector names; the screener UI and its AI parser send either these or finviz-style slugs.
+_YF_SECTORS = {
+    "technology": "Technology",
+    "healthcare": "Healthcare",
+    "financial": "Financial Services",
+    "financial_services": "Financial Services",
+    "consumer_cyclical": "Consumer Cyclical",
+    "consumer_defensive": "Consumer Defensive",
+    "communication_services": "Communication Services",
+    "industrials": "Industrials",
+    "energy": "Energy",
+    "materials": "Basic Materials",
+    "basic_materials": "Basic Materials",
+    "real_estate": "Real Estate",
+    "utilities": "Utilities",
+}
+# NASDAQ (Global Select / Global / Capital), NYSE, NYSE American — excludes OTC listings.
+_YF_US_EXCHANGES = ["NMS", "NGM", "NCM", "NYQ", "ASE"]
+
+
+def _screener_from_yf(
+    sector: Optional[str] = None,
+    mktcap_min: Optional[float] = None,
+    mktcap_max: Optional[float] = None,
+    price_min: Optional[float] = None,
+    price_max: Optional[float] = None,
+    volume_min: Optional[int] = None,
+    beta_min: Optional[float] = None,
+    beta_max: Optional[float] = None,
+    limit: int = 100,
+) -> list[dict]:
+    """Screen US stocks with Yahoo's screener (used when OpenBB/finviz is unavailable)."""
+    try:
+        import yfinance as yf
+        from yfinance import EquityQuery as Q
+
+        sector_name = None
+        if sector:
+            sector_name = _YF_SECTORS.get(sector.strip().lower().replace(" ", "_"), sector)
+
+        clauses = [Q("eq", ["region", "us"]), Q("is-in", ["exchange", *_YF_US_EXCHANGES])]
+        if sector_name: clauses.append(Q("eq", ["sector", sector_name]))
+        if mktcap_min:  clauses.append(Q("gte", ["intradaymarketcap", mktcap_min]))
+        if mktcap_max:  clauses.append(Q("lte", ["intradaymarketcap", mktcap_max]))
+        if price_min:   clauses.append(Q("gte", ["intradayprice", price_min]))
+        if price_max:   clauses.append(Q("lte", ["intradayprice", price_max]))
+        if volume_min:  clauses.append(Q("gte", ["dayvolume", volume_min]))
+        if beta_min:    clauses.append(Q("gte", ["beta", beta_min]))
+        if beta_max:    clauses.append(Q("lte", ["beta", beta_max]))
+
+        result = yf.screen(
+            Q("and", clauses),
+            size=min(limit, 250),  # Yahoo caps a single screen at 250 rows
+            sortField="intradaymarketcap",
+            sortAsc=False,
+        )
+        rows = []
+        for q in result.get("quotes", []):
+            rows.append({
+                "symbol": q.get("symbol"),
+                "name": q.get("longName") or q.get("shortName") or q.get("symbol"),
+                "sector": q.get("sector") or sector_name,
+                "price": q.get("regularMarketPrice"),
+                "change_percent": q.get("regularMarketChangePercent"),
+                "volume": q.get("regularMarketVolume"),
+                "market_cap": q.get("marketCap"),
+                "pe_ratio": q.get("trailingPE"),
+                "beta": q.get("beta"),
+            })
+        return rows
+    except Exception as e:
+        logger.warning(f"yfinance screener fallback failed: {e}")
+        return []
 
 
 # ── Calendar ─────────────────────────────────────────────────────────
+
+_NASDAQ_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
+    "Accept": "application/json, text/plain, */*",
+}
+# Nasdaq calendars change slowly; several views request the same range on page load.
+_NASDAQ_CACHE: dict[str, tuple[float, object]] = {}
+_NASDAQ_CACHE_TTL = 30 * 60
+
+
+def _nasdaq_get(path: str, params: dict) -> Optional[dict]:
+    import time
+    import requests
+
+    key = path + "?" + "&".join(f"{k}={v}" for k, v in sorted(params.items()))
+    cached = _NASDAQ_CACHE.get(key)
+    if cached and time.time() - cached[0] < _NASDAQ_CACHE_TTL:
+        return cached[1]
+    try:
+        resp = requests.get(f"https://api.nasdaq.com/api{path}", params=params, headers=_NASDAQ_HEADERS, timeout=15)
+        resp.raise_for_status()
+        data = resp.json().get("data")
+    except Exception as e:
+        logger.warning(f"Nasdaq calendar request failed ({path} {params}): {e}")
+        return None
+    _NASDAQ_CACHE[key] = (time.time(), data)
+    return data
+
+
+def _nasdaq_num(v) -> Optional[float]:
+    """'$1,234.5' / '(0.12)' / 'N/A' → float or None."""
+    if v is None:
+        return None
+    if isinstance(v, (int, float)):
+        return float(v)
+    s = str(v).strip().replace("$", "").replace(",", "")
+    neg = s.startswith("(") and s.endswith(")")
+    s = s.strip("()")
+    try:
+        n = float(s)
+    except ValueError:
+        return None
+    return -n if neg else n
+
+
+def _nasdaq_date(v) -> Optional[str]:
+    """'10/16/2026' → '2026-10-16'."""
+    if not v:
+        return None
+    try:
+        m, d, y = str(v).split("/")
+        return f"{int(y):04d}-{int(m):02d}-{int(d):02d}"
+    except ValueError:
+        return None
+
+
+def _weekdays(start_date: str, end_date: str) -> list[str]:
+    start, end = date.fromisoformat(start_date), date.fromisoformat(end_date)
+    days = []
+    d = start
+    while d <= end and len(days) < 62:
+        if d.weekday() < 5:
+            days.append(d.isoformat())
+        d += timedelta(days=1)
+    return days
+
+
+def _per_day(path: str, start_date: str, end_date: str, extract) -> list[dict]:
+    from concurrent.futures import ThreadPoolExecutor
+
+    days = _weekdays(start_date, end_date)
+    with ThreadPoolExecutor(max_workers=6) as pool:
+        payloads = list(pool.map(lambda day: (day, _nasdaq_get(path, {"date": day})), days))
+    rows: list[dict] = []
+    for day, data in payloads:
+        if data:
+            rows.extend(extract(day, data))
+    return rows
+
+
+def _earnings_from_nasdaq(start_date: str, end_date: str) -> list[dict]:
+    def extract(day: str, data: dict) -> list[dict]:
+        out = []
+        for r in data.get("rows") or []:
+            eps = _nasdaq_num(r.get("epsForecast"))
+            timing = {"time-pre-market": "before market", "time-after-hours": "after market"}.get(r.get("time") or "", "")
+            out.append({
+                "report_date": day,
+                "symbol": r.get("symbol"),
+                "name": r.get("name"),
+                "eps_consensus": eps,
+                "eps_estimate": eps,
+                "eps_previous": _nasdaq_num(r.get("lastYearEPS")),
+                "num_estimates": _nasdaq_num(r.get("noOfEsts")),
+                "market_cap": _nasdaq_num(r.get("marketCap")),
+                "fiscal_quarter": r.get("fiscalQuarterEnding"),
+                "reporting_time": timing,
+            })
+        return out
+
+    rows = _per_day("/calendar/earnings", start_date, end_date, extract)
+    # Within a day, larger companies first.
+    rows.sort(key=lambda r: (r["report_date"], -(r["market_cap"] or 0)))
+    return rows
+
+
+def _dividends_from_nasdaq(start_date: str, end_date: str) -> list[dict]:
+    def extract(day: str, data: dict) -> list[dict]:
+        out = []
+        for r in ((data.get("calendar") or {}).get("rows")) or []:
+            out.append({
+                "ex_dividend_date": _nasdaq_date(r.get("dividend_Ex_Date")) or day,
+                "symbol": r.get("symbol"),
+                "name": r.get("companyName"),
+                "cash_dividend_rate": _nasdaq_num(r.get("dividend_Rate")),
+                "annualized_amount": _nasdaq_num(r.get("indicated_Annual_Dividend")),
+                "payment_date": _nasdaq_date(r.get("payment_Date")),
+                "record_date": _nasdaq_date(r.get("record_Date")),
+                "declaration_date": _nasdaq_date(r.get("announcement_Date")),
+            })
+        return out
+
+    return _per_day("/calendar/dividends", start_date, end_date, extract)
+
+
+def _ipos_from_nasdaq(start_date: str, end_date: str) -> list[dict]:
+    start, end = date.fromisoformat(start_date), date.fromisoformat(end_date)
+    months = sorted({(start + timedelta(days=i)).strftime("%Y-%m") for i in range((end - start).days + 1)})
+    rows: list[dict] = []
+    seen: set[str] = set()
+    for month in months[:6]:
+        data = _nasdaq_get("/ipo/calendar", {"date": month}) or {}
+        upcoming = ((data.get("upcoming") or {}).get("upcomingTable") or {}).get("rows") or []
+        priced = (data.get("priced") or {}).get("rows") or []
+        for r, date_key in [(r, "expectedPriceDate") for r in upcoming] + [(r, "pricedDate") for r in priced]:
+            ipo_date = _nasdaq_date(r.get(date_key))
+            if not ipo_date or not (start_date <= ipo_date <= end_date) or r.get("dealID") in seen:
+                continue
+            seen.add(r.get("dealID"))
+            price_text = r.get("proposedSharePrice") or ""
+            rows.append({
+                "ipo_date": ipo_date,
+                "symbol": r.get("proposedTickerSymbol"),
+                "name": r.get("companyName"),
+                "exchange": r.get("proposedExchange"),
+                "ipo_price": _nasdaq_num(price_text) if "-" not in price_text else None,
+                "price_range": price_text or None,
+                "shares_offered": _nasdaq_num(r.get("sharesOffered")),
+                "total_offer_size": _nasdaq_num(r.get("dollarValueOfSharesOffered")),
+                "status": r.get("dealStatus") or "Expected",
+            })
+    rows.sort(key=lambda r: r["ipo_date"])
+    return rows
+
 
 @router.get("/calendar/earnings")
 def get_earnings(start_date: Optional[str] = None, end_date: Optional[str] = None):
     start_date = start_date or str(date.today())
     end_date   = end_date   or str(date.today() + timedelta(days=14))
-    return _call(lambda: _obb().equity.calendar.earnings(start_date=start_date, end_date=end_date, provider="nasdaq"))
+    rows = _call(lambda: _obb().equity.calendar.earnings(start_date=start_date, end_date=end_date, provider="nasdaq"))
+    return rows or _earnings_from_nasdaq(start_date, end_date)
 
 
 @router.get("/calendar/ipo")
 def get_ipo(start_date: Optional[str] = None, end_date: Optional[str] = None):
     start_date = start_date or str(date.today())
     end_date   = end_date   or str(date.today() + timedelta(days=30))
-    return _call(lambda: _obb().equity.calendar.ipo(start_date=start_date, end_date=end_date, provider="nasdaq"))
+    rows = _call(lambda: _obb().equity.calendar.ipo(start_date=start_date, end_date=end_date, provider="nasdaq"))
+    return rows or _ipos_from_nasdaq(start_date, end_date)
 
 
 @router.get("/calendar/dividends")
 def get_dividends(start_date: Optional[str] = None, end_date: Optional[str] = None):
     start_date = start_date or str(date.today())
     end_date   = end_date   or str(date.today() + timedelta(days=14))
-    return _call(lambda: _obb().equity.calendar.dividend(start_date=start_date, end_date=end_date, provider="nasdaq"))
+    rows = _call(lambda: _obb().equity.calendar.dividend(start_date=start_date, end_date=end_date, provider="nasdaq"))
+    return rows or _dividends_from_nasdaq(start_date, end_date)
