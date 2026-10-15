@@ -29,7 +29,7 @@ const VIEW_PATHS: Record<View, string> = {
   ticker: '/detail',
   automation: '/ops',
 };
-const DEFAULT_VIEW: View = 'team';
+const DEFAULT_VIEW: View = 'overall';
 
 function viewFromPath(pathname: string): View {
   const path = pathname.replace(/\/+$/, '') || '/';
@@ -112,7 +112,9 @@ function App() {
     const search = activeView === 'ticker' && selectedSymbol ? `?symbol=${encodeURIComponent(selectedSymbol)}` : '';
     const target = path + search;
     if (window.location.pathname + window.location.search === target) return;
-    if (window.location.pathname === path) {
+    // Same view (only ?symbol changed) or an unknown path like "/": replace, so Back doesn't bounce.
+    const onKnownPath = (Object.values(VIEW_PATHS) as string[]).includes(window.location.pathname);
+    if (window.location.pathname === path || !onKnownPath) {
       window.history.replaceState(null, '', target);
     } else {
       window.history.pushState(null, '', target);
